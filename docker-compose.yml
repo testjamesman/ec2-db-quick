@@ -7,7 +7,6 @@ services:
       - postgres-db
       - mysql-db
       - mssql-db
-    # Environment variables for the app to find the databases
     environment:
       - PG_HOST=postgres-db
       - MYSQL_HOST=mysql-db
