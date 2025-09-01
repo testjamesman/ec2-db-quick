@@ -9,7 +9,8 @@ set -e
 # --- Configuration ---
 # Source environment variables from .env file if it exists
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  # The tr command removes carriage returns to prevent issues with files edited on Windows
+  export $(grep -v '^#' .env | tr -d '\r' | xargs)
 fi
 
 # Check for required environment variables

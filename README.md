@@ -17,6 +17,7 @@ ec2-db-quick/
 ├── .gitignore          # Specifies files for git to ignore
 ├── .env.sample         # Sample environment file
 └── README.md           # This setup guide
+
 ```
 
 🚀 Deployment Options
@@ -30,9 +31,9 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
 #### Prerequisites
 
-1.  **AWS CLI Installed & Configured:** Ensure you have the [AWS CLI installed](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [configured](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-quickstart.html) with your credentials.
+1.  **AWS CLI Installed & Configured:** Ensure you have the [AWS CLI installed](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html "null") and [configured](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-quickstart.html "null") with your credentials.
 
-2.  **EC2 Key Pair:** You must have an existing [EC2 Key Pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html) in the AWS region you intend to use. This is required for SSH access.
+2.  **EC2 Key Pair:** You must have an existing [EC2 Key Pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html "null") in the AWS region you intend to use. This is required for SSH access.
 
 3.  **Local Git Clone:** You should have this repository cloned to your local machine.
 
@@ -42,6 +43,7 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
     ```
     cp .env.sample .env
+
     ```
 
 2.  **Edit the `.env` file:** Open the newly created `.env` file and fill in the values for `AWS_REGION`, `KEY_PAIR_NAME`, and your `REPO_URL`.
@@ -50,18 +52,22 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
     ```
     chmod +x aws_deploy.sh
+
     ```
 
-4.  **Run the script from your local terminal.** The script will now read the configuration from your `.env` file and create all necessary AWS resources and start the application.
+4.  **Run the script from your local terminal.** The script will now read the configuration from your `.env` file, create all necessary AWS resources, and start the application.
 
     ```
     ./aws_deploy.sh
+
     ```
 
-5. **Connect using SSH:** After the script completes, it will output the Public IP address of the new instance, which you can use to access the app and SSH to the host if needed.
+5.  **Connect using SSH:** After the script completes, it will output the Public IP address of the new instance. You can use this to access the app and SSH to the host if needed.
+
     ```
     # Replace the path to your .pem file and the public IP address
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
+
     ```
 
 ### Option 2: Manual Deployment on an Existing EC2 Instance
@@ -77,6 +83,7 @@ Use this method if you already have an EC2 instance running and prefer to set up
     ```
     # Replace the path to your .pem file and the public IP address
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
+
     ```
 
 #### Step 2: Prepare the EC2 Instance
@@ -86,55 +93,62 @@ Use this method if you already have an EC2 instance running and prefer to set up
     ```
     git clone <your-repo-url>
     cd ec2-db-quick
+
     ```
 
 2.  **Make the dependency script executable:**
 
     ```
     chmod +x deploy.sh
+
     ```
 
 3.  **Run the script to install Docker and Docker Compose:**
 
     ```
     ./deploy.sh
+
     ```
 
 4.  **IMPORTANT:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
 
 #### Step 3: Run the Application
 
-With Docker, Docker Compose, and the agent installed, you can now start the application and database with a single command.
+With Docker and Docker Compose installed, you can now start the application and database with a single command.
 
 1.  **Navigate to the project directory:**
 
     ```
     cd ec2-db-quick
+
     ```
 
 2.  **Start the services:** The `--build` flag tells Docker Compose to build the application image from the `Dockerfile`. The `-d` flag runs the containers in the background (detached mode).
 
     ```
     docker-compose up --build -d
+
     ```
 
 3.  **Check the status:** You can see the running containers with `docker-compose ps`.
 
     ```
     docker-compose ps
+
     ```
 
-#### Step 5: Stop the Application
+#### Step 4: Stop the Application
 
 To stop and remove the containers, network, and volumes defined in the compose file, run:
 
 ```
 docker-compose down
+
 ```
 
-#### Optional: Install and Configure the Observability Agent
+### Optional: Install and Configure an Observability Agent
 
-Install your observability vendor's agent directly on the EC2 host. The agent will then monitor the host and the Docker containers running on it.
+For full infrastructure monitoring, install your observability vendor's agent directly on the EC2 host. The agent will then monitor the host and the Docker containers running on it. This should be done *after* you've connected to the EC2 instance via SSH.
 
 1.  **Install the Agent:** Follow your vendor's instructions to install the host agent.
 
