@@ -8,24 +8,28 @@ This application provides a set of endpoints designed to generate various types 
 
 ```
 ec2-db-quick/
-├── aws_deploy.sh       # Automated AWS EC2 deployment script
-├── docker-compose.yml  # Manages the app and db containers
-├── Dockerfile          # Defines the Python application container
-├── deploy.sh           # Manual dependency setup for an existing EC2
-├── app.py              # The main FastAPI application
-├── requirements.txt    # Python dependencies
-└── README.md           # This setup guide
+├── aws_deploy.sh            # Automated AWS EC2 instance creation script
+├── local_docker_install.sh  # Installs Docker & Compose on the EC2 host
+├── docker-compose.yml       # Manages the app and db containers
+├── Dockerfile               # Defines the Python application container
+├── app.py                   # The main FastAPI application
+├── requirements.txt         # Python dependencies
+└── README.md                # This setup guide
 
 ```
 
-🚀 Deployment Options
----------------------
+🚀 Deployment Guide
+-------------------
 
-Choose one of the following methods to deploy the application.
+The deployment is a two-step process:
 
-### Option 1: Automated EC2 Setup with AWS CLI (Recommended)
+1.  **Provision:** Use the `aws_deploy.sh` script from your local machine to create the EC2 instance and its networking.
 
-This method uses the AWS CLI to create and configure an EC2 instance from your local machine, including all dependencies and application startup.
+2.  **Configure & Run:** SSH into the new instance to install dependencies and start the application.
+
+### Step 1: Provision the EC2 Instance (Local Machine)
+
+This method uses the AWS CLI to create the EC2 instance from your local machine.
 
 #### Prerequisites
 
@@ -33,34 +37,22 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
 2.  **EC2 Key Pair:** You must have an existing [EC2 Key Pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html "null") in the AWS region you intend to use. This is required for SSH access.
 
-3.  **Local Git Clone:** You should have this repository cloned to your local machine.
+3.  **Git Clone:** You should have this repository cloned to your local machine.
 
-#### Steps
+#### Instructions
 
-1.  **Set Environment Variables:** Before running the script, you must export three environment variables in your terminal. These variables are only set for your current terminal session.
+1.  **Set Environment Variables:** Before running the script, you must export the required configuration as environment variables in your terminal.
 
-    -   `AWS_REGION`: The AWS region to deploy to (e.g., `us-east-1`).
+    -   **On macOS or Linux:**
 
-    -   `KEY_PAIR_NAME`: The name of your existing EC2 key pair.
+        ```
+        export AWS_REGION="us-west-1"
+        export KEY_PAIR_NAME="your-key-pair-name"
+        export REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
 
-    -   `REPO_URL`: The HTTPS URL of this git repository.
+        ```
 
-    **On macOS or Linux:**
-
-    ```
-    export AWS_REGION="us-west-1"
-    export KEY_PAIR_NAME="your-key-pair-name"
-    export REPO_URL="https://github.com/your-username/ec2-db-quick.git"
-    ```
-
-    **On Windows (PowerShell):**
-
-    ```
-    $env:AWS_REGION="us-east-1"
-    $env:KEY_PAIR_NAME="your-key-pair-name"
-    $env:REPO_URL="https://github.com/your-username/ec2-db-quick.git"
-
-    ```
+    -   **Note:** Replace the values with your specific AWS region, key pair name, and the Git repository URL.
 
 2.  **Make the script executable:**
 
@@ -69,73 +61,69 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
     ```
 
-3.  **Run the deployment script:**
+3.  **Run the script:**
 
     ```
     ./aws_deploy.sh
 
     ```
 
-4.  **Connect and Access:** After the script completes, it will output the Public IP address of the new instance. Use this to access the application in your browser (`http://<public-ip>:8000`) or to connect via SSH.
+    The script will create the EC2 instance and security group. When it finishes, it will output the **Public IP address** of the new instance. You will need this for the next step.
 
-### Option 2: Manual Deployment on an Existing EC2 Instance
+### Step 2: Configure and Run the Application (EC2 Instance)
 
-Use this method if you already have an EC2 instance running and prefer to set up the environment manually.
+Now, you will connect to the newly created instance to set up Docker and run the application.
 
-#### Step 1: Connect to Your EC2 Instance
-
-1.  **Find your instance's Public IP:** In the AWS EC2 Console, select your instance and find the "Public IPv4 address" in the details panel.
-
-2.  **Connect using SSH:**
+1.  **Connect to Your EC2 Instance via SSH:**
 
     ```
-    # Replace the path to your .pem file and the public IP address
+    # Replace the path to your .pem file and the public IP from the previous step
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
 
     ```
 
-#### Step 2: Prepare the EC2 Instance
-
-1.  **Clone the repository:**
+2.  **Clone the Repository:**
 
     ```
-    git clone <your-repo-url>
+    git clone $REPO_URL
     cd ec2-db-quick
 
     ```
 
-2.  **Install dependencies:**
+    *(Note: You can get the `$REPO_URL` by running `echo $REPO_URL` on your local machine if you forget it)*
+
+3.  **Install Docker and Docker Compose:** Run the installation script.
 
     ```
-    chmod +x deploy.sh
-    ./deploy.sh
+    chmod +x local_docker_install.sh
+    ./local_docker_install.sh
 
     ```
 
-3.  **IMPORTANT:** Log out and log back in to your EC2 instance for the Docker group permissions to apply.
+4.  **IMPORTANT: Re-login to Apply Permissions:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
 
-#### Step 3: Run the Application
+    ```
+    exit
+    # Now, re-run the ssh command from step 1
+    ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
 
-1.  **Navigate to the project directory:**
+    ```
+
+5.  **Start the Application:** Once you are logged back in, navigate to the project directory and start the services using Docker Compose.
 
     ```
     cd ec2-db-quick
+    docker compose up --build -d
 
     ```
 
-2.  **Start the services:**
+6.  **Verify:** Your application should now be accessible at `http://<your-public-ip>:8000`. You can check the status of the running containers with `docker compose ps`.
 
-    ```
-    docker-compose up --build -d
+### Stopping the Application
 
-    ```
+To stop and remove the containers, network, and volumes, run the following command from the project directory on the EC2 instance:
 
-### Optional: Install Observability Agent
+```
+docker compose down
 
-Once the EC2 instance is running, you can install your observability vendor's agent directly on the host to monitor the system and the Docker containers.
-
-1.  **SSH into the instance.**
-
-2.  **Follow your vendor's instructions** to install the host agent.
-
-3.  **Configure the agent** for Docker and PostgreSQL monitoring. Since the database port (`5432`) is mapped to the host, the agent can connect to it via `localhost`.
+```
