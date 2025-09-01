@@ -3,6 +3,8 @@ EC2 DB Quick Test Application
 
 This application provides a set of endpoints designed to generate various types of telemetry data for testing an observability vendor integration. It runs entirely within Docker containers managed by Docker Compose, providing test endpoints for PostgreSQL, MySQL, and Microsoft SQL Server.
 
+> **⚠️ Cost Warning:** This demo uses a `t3.medium` EC2 instance by default, which is **outside the AWS Free Tier**. To avoid unexpected charges, please ensure you terminate the EC2 instance using the AWS Console or by running `docker compose down` and then shutting down the instance when you are finished with your testing.
+
 📁 Project Structure
 --------------------
 
