@@ -86,9 +86,8 @@ Use this method if you already have an EC2 instance running and prefer to set up
 2.  **Clone the repository (if not done by `aws_deploy.sh`):**
 
     ```
-    git clone [https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)
+    git clone https://github.com/your-username/ec2-db-quick.git
     cd ec2-db-quick
-
     ```
 
 #### Step 2: Install Docker and Docker Compose
