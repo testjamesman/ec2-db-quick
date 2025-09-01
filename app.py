@@ -5,6 +5,7 @@ import httpx
 import asyncpg
 import aiomysql
 import aioodbc
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -13,22 +14,21 @@ app = FastAPI()
 
 # --- Application Configuration ---
 APP_PORT = int(os.getenv("APP_PORT", 8000))
+NUM_PRODUCTS_TO_SEED = int(os.getenv("NUM_PRODUCTS_TO_SEED", 50000))
 
-# --- PostgreSQL Configuration ---
+# --- Database Configurations ---
 PG_HOST = os.getenv("PG_HOST", "postgres-db")
 PG_PORT = int(os.getenv("PG_PORT", 5432))
 PG_NAME = os.getenv("PG_NAME", "ec2_db_quick_test")
 PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASS = os.getenv("PG_PASS", "postgres")
 
-# --- MySQL Configuration ---
 MYSQL_HOST = os.getenv("MYSQL_HOST", "mysql-db")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 MYSQL_NAME = os.getenv("MYSQL_NAME", "ec2_db_quick_test")
 MYSQL_USER = os.getenv("MYSQL_USER", "mysql_user")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "mysql_password")
 
-# --- MSSQL Configuration ---
 MSSQL_HOST = os.getenv("MSSQL_HOST", "mssql-db")
 MSSQL_PORT = int(os.getenv("MSSQL_PORT", 1433))
 MSSQL_NAME = os.getenv("MSSQL_NAME", "ec2_db_quick_test")
@@ -36,268 +36,274 @@ MSSQL_USER = os.getenv("MSSQL_USER", "sa")
 MSSQL_PASS = os.getenv("MSSQL_PASS", "aStrongPassword123!")
 MSSQL_DRIVER = os.getenv("MSSQL_DRIVER", "ODBC Driver 18 for SQL Server")
 
-
-# --- Database Initialization ---
+# --- Database Initialization & Seeding ---
 async def init_postgres_db():
-    """Initializes PostgreSQL by creating the necessary table, with retries."""
-    retries = 5
-    delay = 3
-    for i in range(retries):
-        try:
-            conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS web_visits (
-                    id SERIAL PRIMARY KEY,
-                    visit_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
+    """Initializes and seeds the PostgreSQL database."""
+    print("Initializing PostgreSQL...")
+    conn = None
+    try:
+        conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS web_visits (id SERIAL PRIMARY KEY, visit_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS products (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100),
+                category VARCHAR(50),
+                price NUMERIC(10, 2)
+            );
+        """)
+        # Seed products table if it's empty
+        count = await conn.fetchval('SELECT COUNT(*) FROM products')
+        if count == 0:
+            print(f"Seeding PostgreSQL 'products' table with {NUM_PRODUCTS_TO_SEED} rows...")
+            categories = ['electronics', 'books', 'home', 'toys', 'sports']
+            products_data = [
+                (f'Product {i}', random.choice(categories), random.uniform(10.0, 500.0))
+                for i in range(NUM_PRODUCTS_TO_SEED)
+            ]
+            await conn.copy_records_to_table('products', records=products_data, columns=['name', 'category', 'price'])
+            print("✅ PostgreSQL seeding complete.")
+    except Exception as e:
+        print(f"🔴 PostgreSQL initialization failed: {e}")
+    finally:
+        if conn:
             await conn.close()
-            print(f"✅ PostgreSQL database initialized successfully on attempt {i+1}.")
-            return
-        except Exception as e:
-            print(f"🔴 Could not initialize PostgreSQL (attempt {i+1}/{retries}): {e}")
-            if i < retries - 1:
-                await asyncio.sleep(delay)
-            else:
-                print("🔴 PostgreSQL initialization failed after all retries.")
-
 
 async def init_mysql_db():
-    """Initializes MySQL by creating the necessary table, with retries."""
-    retries = 5
-    delay = 3
-    for i in range(retries):
-        try:
-            conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, autocommit=True)
-            async with conn.cursor() as cur:
-                await cur.execute("""
-                    CREATE TABLE IF NOT EXISTS web_visits_mysql (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-            conn.close()
-            print(f"✅ MySQL database initialized successfully on attempt {i+1}.")
-            return
-        except Exception as e:
-            print(f"🔴 Could not initialize MySQL (attempt {i+1}/{retries}): {e}")
-            if i < retries - 1:
-                await asyncio.sleep(delay)
-            else:
-                print("🔴 MySQL initialization failed after all retries.")
-
-async def init_mssql_db():
-    """
-    Initializes MSSQL. First, it ensures the database exists by connecting to the
-    'master' database, then it connects to the target database to create the table.
-    """
-    retries = 10
-    delay = 5
-
-    # --- Step 1: Ensure the database exists by connecting to the master DB ---
-    master_dsn = (
-        f"Driver={{{MSSQL_DRIVER}}};"
-        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
-        f"Database=master;"  # Connect to master DB first
-        f"UID={MSSQL_USER};"
-        f"PWD={MSSQL_PASS};"
-        "Encrypt=no;"
-        "TrustServerCertificate=yes;"
-    )
-    db_exists = False
-    for i in range(retries):
-        try:
-            conn = await aioodbc.connect(dsn=master_dsn, autocommit=True)
-            cur = await conn.cursor()
-            # Check if database exists
-            await cur.execute(f"SELECT name FROM sys.databases WHERE name = N'{MSSQL_NAME}'")
-            if await cur.fetchone():
-                print(f"✅ MSSQL database '{MSSQL_NAME}' already exists.")
-                db_exists = True
-            else:
-                print(f"--> MSSQL database '{MSSQL_NAME}' not found. Creating it...")
-                await cur.execute(f"CREATE DATABASE {MSSQL_NAME}")
-                print(f"✅ MSSQL database '{MSSQL_NAME}' created successfully.")
-                db_exists = True
-            
-            await cur.close()
-            await conn.close()
-            break  # Exit retry loop on success
-        except Exception as e:
-            print(f"🔴 Could not connect to MSSQL master DB (attempt {i+1}/{retries}): {e}")
-            if i < retries - 1:
-                await asyncio.sleep(delay)
-            else:
-                print("🔴 MSSQL master connection failed after all retries. Cannot create database.")
-                return  # Stop if we can't even connect to master
-
-    if not db_exists:
-        return  # Cannot proceed if database was not created
-
-    # --- Step 2: Connect to the target database and create the table ---
-    app_dsn = (
-        f"Driver={{{MSSQL_DRIVER}}};"
-        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
-        f"Database={MSSQL_NAME};"  # Now connect to the correct DB
-        f"UID={MSSQL_USER};"
-        f"PWD={MSSQL_PASS};"
-        "Encrypt=no;"
-        "TrustServerCertificate=yes;"
-    )
-    for i in range(retries):
-        try:
-            conn = await aioodbc.connect(dsn=app_dsn, autocommit=True)
-            cur = await conn.cursor()
-            # Check if table exists before creating
+    """Initializes and seeds the MySQL database."""
+    print("Initializing MySQL...")
+    conn = None
+    try:
+        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, autocommit=True)
+        async with conn.cursor() as cur:
+            await cur.execute("CREATE TABLE IF NOT EXISTS web_visits_mysql (id INT AUTO_INCREMENT PRIMARY KEY, visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP);")
             await cur.execute("""
-                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='web_visits_mssql' and xtype='U')
-                CREATE TABLE web_visits_mssql (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    visit_time DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
+                CREATE TABLE IF NOT EXISTS products (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100),
+                    category VARCHAR(50),
+                    price DECIMAL(10, 2)
                 );
             """)
-            await cur.close()
-            await conn.close()
-            print(f"✅ MSSQL table 'web_visits_mssql' initialized successfully on attempt {i+1}.")
-            return
-        except Exception as e:
-            print(f"🔴 Could not initialize MSSQL table (attempt {i+1}/{retries}): {e}")
-            if i < retries - 1:
-                await asyncio.sleep(delay)
-            else:
-                print("🔴 MSSQL table initialization failed after all retries.")
+            await cur.execute('SELECT COUNT(*) FROM products')
+            (count,) = await cur.fetchone()
+            if count == 0:
+                print(f"Seeding MySQL 'products' table with {NUM_PRODUCTS_TO_SEED} rows...")
+                categories = ['electronics', 'books', 'home', 'toys', 'sports']
+                products_data = [
+                    (f'Product {i}', random.choice(categories), round(random.uniform(10.0, 500.0), 2))
+                    for i in range(NUM_PRODUCTS_TO_SEED)
+                ]
+                await cur.executemany("INSERT INTO products (name, category, price) VALUES (%s, %s, %s)", products_data)
+                print("✅ MySQL seeding complete.")
+    except Exception as e:
+        print(f"🔴 MySQL initialization failed: {e}")
+    finally:
+        if conn:
+            conn.close()
 
+async def init_mssql_db():
+    """Initializes and seeds the MSSQL database."""
+    print("Initializing MSSQL...")
+    # Step 1: Ensure database exists
+    master_dsn = f"Driver={{{MSSQL_DRIVER}}};Server=tcp:{MSSQL_HOST},{MSSQL_PORT};Database=master;UID={MSSQL_USER};PWD={MSSQL_PASS};Encrypt=no;TrustServerCertificate=yes;"
+    app_dsn = f"Driver={{{MSSQL_DRIVER}}};Server=tcp:{MSSQL_HOST},{MSSQL_PORT};Database={MSSQL_NAME};UID={MSSQL_USER};PWD={MSSQL_PASS};Encrypt=no;TrustServerCertificate=yes;"
+    try:
+        async with aioodbc.connect(dsn=master_dsn, autocommit=True) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'{MSSQL_NAME}') CREATE DATABASE {MSSQL_NAME}")
+        # Step 2: Create tables and seed data
+        async with aioodbc.connect(dsn=app_dsn, autocommit=True) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='web_visits_mssql' and xtype='U') CREATE TABLE web_visits_mssql (id INT IDENTITY(1,1) PRIMARY KEY, visit_time DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET());")
+                await cur.execute("""
+                    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='products' and xtype='U')
+                    CREATE TABLE products (
+                        id INT IDENTITY(1,1) PRIMARY KEY,
+                        name NVARCHAR(100),
+                        category NVARCHAR(50),
+                        price DECIMAL(10, 2)
+                    );
+                """)
+                await cur.execute('SELECT COUNT(*) FROM products')
+                (count,) = await cur.fetchone()
+                if count == 0:
+                    print(f"Seeding MSSQL 'products' table with {NUM_PRODUCTS_TO_SEED} rows...")
+                    categories = ['electronics', 'books', 'home', 'toys', 'sports']
+                    products_data = [
+                        (f'Product {i}', random.choice(categories), round(random.uniform(10.0, 500.0), 2))
+                        for i in range(NUM_PRODUCTS_TO_SEED)
+                    ]
+                    await cur.executemany("INSERT INTO products (name, category, price) VALUES (?, ?, ?)", products_data)
+                    print("✅ MSSQL seeding complete.")
+    except Exception as e:
+        print(f"🔴 MSSQL initialization failed: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    """On application startup, initialize all databases."""
     await init_postgres_db()
     await init_mysql_db()
     await init_mssql_db()
 
-
-# --- HTML Template for the Homepage ---
+# --- HTML Template ---
 HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>O11y Test App</title>
-    <!-- ⬇️ PASTE YOUR RUM SNIPPET HERE ⬇️ -->
-
-    <!-- ⬆️ PASTE YOUR RUM SNIPPET HERE ⬇️ -->
-    <style>
-        body { font-family: sans-serif; background-color: #2b2d42; color: #edf2f4; margin: 40px; }
-        h1, h2 { color: #8d99ae; }
-        a { color: #93c5fd; text-decoration: none; font-weight: bold; }
-        a:hover { text-decoration: underline; }
-        .container { max-width: 800px; margin: auto; background-color: #43455f; padding: 20px; border-radius: 8px; }
-        pre { background-color: #2b2d42; padding: 15px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 O11y Test Application</h1>
-        <p>Use these endpoints to generate telemetry data.</p>
-        <h2>Endpoints:</h2>
-        <ul>
-            <li><a href="/" target="_blank">/ (Home)</a> - RUM & basic APM trace.</li>
-            <li><a href="/postgres_interaction" target="_blank">/postgres_interaction</a> - Inserts and selects from PostgreSQL.</li>
-            <li><a href="/mysql_interaction" target="_blank">/mysql_interaction</a> - Inserts and selects from MySQL.</li>
-            <li><a href="/mssql_interaction" target="_blank">/mssql_interaction</a> - Inserts and selects from MSSQL.</li>
-            <li><a href="/cpu_intensive" target="_blank">/cpu_intensive</a> - Simulates high CPU load.</li>
-            <li><a href="/error" target="_blank">/error</a> - Triggers a 500 error to test error tracking.</li>
-        </ul>
-        <h2>Actions:</h2>
-        <p><a href="/generate_load">/generate_load</a> - Click here to start a 60-second load generation task in the background.</p>
-    </div>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>O11y Test App</title>
+<style>
+body{font-family:sans-serif;background-color:#2b2d42;color:#edf2f4;margin:40px}h1,h2{color:#8d99ae}a{color:#93c5fd;text-decoration:none;font-weight:700}a:hover{text-decoration:underline}.container{max-width:800px;margin:auto;background-color:#43455f;padding:20px;border-radius:8px}
+</style></head><body><div class="container"><h1>🚀 O11y Test Application</h1>
+<p>Use these endpoints to generate complex database telemetry data.</p>
+<h2>Database Scenarios:</h2><ul>
+<li><a href="/postgres_interaction" target="_blank">/postgres_interaction</a> - Runs slow, waiting, and blocking queries against PostgreSQL.</li>
+<li><a href="/mysql_interaction" target="_blank">/mysql_interaction</a> - Runs slow, waiting, and blocking queries against MySQL.</li>
+<li><a href="/mssql_interaction" target="_blank">/mssql_interaction</a> - Runs slow, waiting, and blocking queries against MSSQL.</li>
+</ul><h2>Other Endpoints:</h2><ul>
+<li><a href="/cpu_intensive" target="_blank">/cpu_intensive</a> - Simulates high CPU load.</li>
+<li><a href="/error" target="_blank">/error</a> - Triggers a 500 error.</li>
+</ul><h2>Actions:</h2><p><a href="/generate_load">/generate_load</a> - Click to start a 60-second load generation task.</p>
+</div></body></html>
 """
+
+# --- Scenario Implementations ---
+
+# PostgreSQL Scenarios
+async def _pg_normal_query(pool):
+    async with pool.acquire() as conn:
+        return await conn.fetchval("INSERT INTO web_visits DEFAULT VALUES RETURNING id;")
+async def _pg_slow_query(pool):
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT COUNT(*) FROM products WHERE category = 'electronics';")
+async def _pg_wait_query(pool):
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT pg_sleep(0.5);")
+async def _pg_blocking_scenario(pool):
+    product_id_to_lock = random.randint(1, 100)
+    async def blocker(conn):
+        async with conn.transaction():
+            await conn.execute("SELECT * FROM products WHERE id = $1 FOR UPDATE;", product_id_to_lock)
+            await asyncio.sleep(1)
+    async def blocked(conn):
+        return await conn.fetchval("SELECT price FROM products WHERE id = $1;", product_id_to_lock)
+    async with pool.acquire() as conn1, pool.acquire() as conn2:
+        _, result = await asyncio.gather(blocker(conn1), blocked(conn2))
+        return result
+
+# MySQL Scenarios
+async def _mysql_normal_query(pool):
+    async with pool.acquire() as conn, conn.cursor() as cur:
+        await cur.execute("INSERT INTO web_visits_mysql () VALUES ();")
+        return cur.lastrowid
+async def _mysql_slow_query(pool):
+    async with pool.acquire() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT COUNT(*) FROM products WHERE category = 'electronics';")
+        (count,) = await cur.fetchone()
+        return count
+async def _mysql_wait_query(pool):
+    async with pool.acquire() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT SLEEP(0.5);")
+        return "Slept for 0.5s"
+async def _mysql_blocking_scenario(pool):
+    product_id_to_lock = random.randint(1, 100)
+    async def blocker(conn):
+        async with conn.cursor() as cur:
+            await conn.begin()
+            await cur.execute("SELECT * FROM products WHERE id = %s FOR UPDATE;", (product_id_to_lock,))
+            await asyncio.sleep(1)
+            await conn.commit()
+    async def blocked(conn):
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT price FROM products WHERE id = %s;", (product_id_to_lock,))
+            (price,) = await cur.fetchone()
+            return price
+    async with pool.acquire() as conn1, pool.acquire() as conn2:
+        _, result = await asyncio.gather(blocker(conn1), blocked(conn2))
+        return result
+
+# MSSQL Scenarios
+async def _mssql_normal_query(dsn):
+    async with aioodbc.connect(dsn=dsn, autocommit=True) as conn, conn.cursor() as cur:
+        await cur.execute("INSERT INTO web_visits_mssql DEFAULT VALUES; SELECT SCOPE_IDENTITY();")
+        return await cur.fetchval()
+async def _mssql_slow_query(dsn):
+    async with aioodbc.connect(dsn=dsn) as conn, conn.cursor() as cur:
+        await cur.execute("SELECT COUNT(*) FROM products WHERE category = 'electronics';")
+        (count,) = await cur.fetchone()
+        return count
+async def _mssql_wait_query(dsn):
+    async with aioodbc.connect(dsn=dsn, autocommit=True) as conn, conn.cursor() as cur:
+        await cur.execute("WAITFOR DELAY '00:00:00.500';")
+        return "Waited for 0.5s"
+async def _mssql_blocking_scenario(dsn):
+    product_id_to_lock = random.randint(1, 100)
+    async def blocker():
+        async with aioodbc.connect(dsn=dsn) as conn:
+            await conn.autocommit(False)
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT * FROM products WITH (UPDLOCK) WHERE id = ?;", (product_id_to_lock,))
+                await asyncio.sleep(1)
+            await conn.commit()
+    async def blocked():
+        async with aioodbc.connect(dsn=dsn) as conn, conn.cursor() as cur:
+            await cur.execute("SELECT price FROM products WHERE id = ?;", (product_id_to_lock,))
+            (price,) = await cur.fetchone()
+            return price
+    _, result = await asyncio.gather(blocker(), blocked())
+    return result
 
 # --- FastAPI Endpoints ---
 @app.get("/", response_class=HTMLResponse)
-async def home():
-    """Homepage endpoint. This is where you'll test RUM."""
-    return HTML_TEMPLATE
+async def home(): return HTML_TEMPLATE
 
 @app.get("/postgres_interaction")
 async def postgres_interaction():
-    """Connects to PostgreSQL, inserts a visit, and retrieves the last 10."""
+    pool = await asyncpg.create_pool(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT, min_size=5)
     try:
-        conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
-        await conn.execute("INSERT INTO web_visits DEFAULT VALUES;")
-        visits = await conn.fetch("SELECT id, visit_time FROM web_visits ORDER BY visit_time DESC LIMIT 10;")
-        await conn.close()
-        return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PostgreSQL connection failed: {e}")
+        results = await asyncio.gather(
+            _pg_normal_query(pool),
+            _pg_slow_query(pool),
+            _pg_wait_query(pool),
+            _pg_blocking_scenario(pool)
+        )
+        return {"normal_insert_id": results[0], "slow_query_count": results[1], "wait_result": "Slept for 0.5s", "blocking_read_price": float(results[3])}
+    finally:
+        await pool.close()
 
 @app.get("/mysql_interaction")
 async def mysql_interaction():
-    """Connects to MySQL, inserts a visit, and retrieves the last 10."""
+    pool = await aiomysql.create_pool(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, minsize=5)
     try:
-        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, autocommit=True)
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("INSERT INTO web_visits_mysql () VALUES ();")
-            await cur.execute("SELECT id, visit_time FROM web_visits_mysql ORDER BY visit_time DESC LIMIT 10;")
-            visits = await cur.fetchall()
-        conn.close()
-        return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"MySQL connection failed: {e}")
+        results = await asyncio.gather(
+            _mysql_normal_query(pool),
+            _mysql_slow_query(pool),
+            _mysql_wait_query(pool),
+            _mysql_blocking_scenario(pool)
+        )
+        return {"normal_insert_id": results[0], "slow_query_count": results[1], "wait_result": results[2], "blocking_read_price": float(results[3])}
+    finally:
+        pool.close()
 
 @app.get("/mssql_interaction")
 async def mssql_interaction():
-    """Connects to MSSQL, inserts a visit, and retrieves the last 10."""
-    dsn = (
-        f"Driver={{{MSSQL_DRIVER}}};"
-        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
-        f"Database={MSSQL_NAME};"
-        f"UID={MSSQL_USER};"
-        f"PWD={MSSQL_PASS};"
-        "Encrypt=no;"
-        "TrustServerCertificate=yes;"
+    dsn = f"Driver={{{MSSQL_DRIVER}}};Server=tcp:{MSSQL_HOST},{MSSQL_PORT};Database={MSSQL_NAME};UID={MSSQL_USER};PWD={MSSQL_PASS};Encrypt=no;TrustServerCertificate=yes;"
+    results = await asyncio.gather(
+        _mssql_normal_query(dsn),
+        _mssql_slow_query(dsn),
+        _mssql_wait_query(dsn),
+        _mssql_blocking_scenario(dsn)
     )
-    try:
-        conn = await aioodbc.connect(dsn=dsn, autocommit=True)
-        cur = await conn.cursor()
-        await cur.execute("INSERT INTO web_visits_mssql DEFAULT VALUES;")
-        # Cast the DATETIMEOFFSET to a string (ISO 8601 format) to avoid driver issues.
-        await cur.execute("""
-            SELECT TOP 10 id, CONVERT(VARCHAR(34), visit_time, 127) as visit_time 
-            FROM web_visits_mssql 
-            ORDER BY visit_time DESC;
-        """)
-        
-        # Manually construct dicts from the result rows
-        columns = [column[0] for column in cur.description]
-        visits = [dict(zip(columns, row)) for row in await cur.fetchall()]
-        
-        await cur.close()
-        await conn.close()
-        return visits
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"MSSQL connection failed: {e}")
-
+    return {"normal_insert_id": results[0], "slow_query_count": results[1], "wait_result": results[2], "blocking_read_price": float(results[3])}
 
 @app.get("/cpu_intensive")
 async def cpu_intensive_task():
-    """Simulates a CPU-bound task."""
     result = sum(i*i for i in range(2_000_000))
     return {"message": "CPU intensive task complete", "result": result}
 
 @app.get("/error")
 async def trigger_error():
-    """Raises an exception to test error tracking."""
     raise ValueError("This is an intentional test error!")
 
-# --- Load Generation ---
 async def run_load_generation():
-    """Target function for the background task to generate load."""
-    print("🚦 Starting load generation for 60 seconds...")
+    print("🚦 Starting complex load generation for 60 seconds...")
     endpoints = [
-        f"http://localhost:{APP_PORT}/",
         f"http://localhost:{APP_PORT}/postgres_interaction",
         f"http://localhost:{APP_PORT}/mysql_interaction",
         f"http://localhost:{APP_PORT}/mssql_interaction",
@@ -308,15 +314,13 @@ async def run_load_generation():
         start_time = asyncio.time()
         while asyncio.time() - start_time < 60:
             try:
-                endpoint = random.choice(endpoints)
-                await client.get(endpoint, timeout=10) # Increased timeout for slower MSSQL
+                await client.get(random.choice(endpoints), timeout=20)
             except httpx.RequestError as e:
-                print(f"Request failed (as expected for error endpoint or timeout): {e}")
-            await asyncio.sleep(random.uniform(0.1, 0.5))
+                print(f"Request failed: {e}")
+            await asyncio.sleep(random.uniform(0.2, 0.8))
     print("🏁 Load generation finished.")
 
 @app.get("/generate_load")
 async def generate_load():
-    """Starts the load generation as a background task."""
     asyncio.create_task(run_load_generation())
-    return {"message": "🚀 Load generation started in the background for 60 seconds!"}
+    return {"message": "🚀 Complex load generation started in the background for 60 seconds!"}
