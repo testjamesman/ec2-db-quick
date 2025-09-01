@@ -4,6 +4,7 @@ import asyncio
 import httpx
 import asyncpg
 import aiomysql
+import aioodbc
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -14,57 +15,123 @@ app = FastAPI()
 APP_PORT = int(os.getenv("APP_PORT", 8000))
 
 # --- PostgreSQL Configuration ---
-PG_HOST = os.getenv("PG_HOST", "localhost")
+PG_HOST = os.getenv("PG_HOST", "postgres-db")
 PG_PORT = int(os.getenv("PG_PORT", 5432))
 PG_NAME = os.getenv("PG_NAME", "ec2_db_quick_test")
 PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASS = os.getenv("PG_PASS", "postgres")
 
 # --- MySQL Configuration ---
-MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "mysql-db")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 MYSQL_NAME = os.getenv("MYSQL_NAME", "ec2_db_quick_test")
 MYSQL_USER = os.getenv("MYSQL_USER", "mysql_user")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "mysql_password")
 
+# --- MSSQL Configuration ---
+MSSQL_HOST = os.getenv("MSSQL_HOST", "mssql-db")
+MSSQL_PORT = int(os.getenv("MSSQL_PORT", 1433))
+MSSQL_NAME = os.getenv("MSSQL_NAME", "ec2_db_quick_test")
+MSSQL_USER = os.getenv("MSSQL_USER", "sa")
+MSSQL_PASS = os.getenv("MSSQL_PASS", "aStrongPassword123!")
+# Note: The ODBC Driver version may vary. This is for the one installed in the Dockerfile.
+MSSQL_DRIVER = os.getenv("MSSQL_DRIVER", "ODBC Driver 18 for SQL Server")
+
 
 # --- Database Initialization ---
 async def init_postgres_db():
-    """Initializes PostgreSQL by creating the necessary table."""
-    try:
-        conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS web_visits_postgres (
-                id SERIAL PRIMARY KEY,
-                visit_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        await conn.close()
-        print("✅ PostgreSQL database initialized successfully.")
-    except Exception as e:
-        print(f"🔴 Could not initialize PostgreSQL database: {e}")
-
-async def init_mysql_db():
-    """Initializes MySQL by creating the necessary table."""
-    try:
-        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME)
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                CREATE TABLE IF NOT EXISTS web_visits_mysql (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    """Initializes PostgreSQL by creating the necessary table, with retries."""
+    retries = 5
+    delay = 3
+    for i in range(retries):
+        try:
+            conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS web_visits (
+                    id SERIAL PRIMARY KEY,
+                    visit_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-        conn.close()
-        print("✅ MySQL database initialized successfully.")
-    except Exception as e:
-        print(f"🔴 Could not initialize MySQL database: {e}")
+            await conn.close()
+            print(f"✅ PostgreSQL database initialized successfully on attempt {i+1}.")
+            return
+        except Exception as e:
+            print(f"🔴 Could not initialize PostgreSQL (attempt {i+1}/{retries}): {e}")
+            if i < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                print("🔴 PostgreSQL initialization failed after all retries.")
+
+
+async def init_mysql_db():
+    """Initializes MySQL by creating the necessary table, with retries."""
+    retries = 5
+    delay = 3
+    for i in range(retries):
+        try:
+            conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, autocommit=True)
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS web_visits_mysql (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+            conn.close()
+            print(f"✅ MySQL database initialized successfully on attempt {i+1}.")
+            return
+        except Exception as e:
+            print(f"🔴 Could not initialize MySQL (attempt {i+1}/{retries}): {e}")
+            if i < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                print("🔴 MySQL initialization failed after all retries.")
+
+async def init_mssql_db():
+    """Initializes MSSQL by creating the necessary table, with retries."""
+    retries = 10  # MSSQL can be slower to start
+    delay = 5
+    # For aioodbc, we need to build a DSN (connection string)
+    dsn = (
+        f"Driver={{{MSSQL_DRIVER}}};"
+        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
+        f"Database={MSSQL_NAME};"
+        f"UID={MSSQL_USER};"
+        f"PWD={MSSQL_PASS};"
+        "Encrypt=no;"
+        "TrustServerCertificate=yes;"
+    )
+    for i in range(retries):
+        try:
+            conn = await aioodbc.connect(dsn=dsn, autocommit=True)
+            cur = await conn.cursor()
+            # Check if table exists before creating
+            await cur.execute("""
+                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='web_visits_mssql' and xtype='U')
+                CREATE TABLE web_visits_mssql (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    visit_time DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
+                );
+            """)
+            await cur.close()
+            await conn.close()
+            print(f"✅ MSSQL database initialized successfully on attempt {i+1}.")
+            return
+        except Exception as e:
+            print(f"🔴 Could not initialize MSSQL (attempt {i+1}/{retries}): {e}")
+            if i < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                print("🔴 MSSQL initialization failed after all retries.")
+
 
 @app.on_event("startup")
 async def startup_event():
-    """On application startup, initialize both databases."""
+    """On application startup, initialize all databases."""
     await init_postgres_db()
     await init_mysql_db()
+    await init_mssql_db()
+
 
 # --- HTML Template for the Homepage ---
 HTML_TEMPLATE = """
@@ -79,7 +146,7 @@ HTML_TEMPLATE = """
     <style>
         body { font-family: sans-serif; background-color: #2b2d42; color: #edf2f4; margin: 40px; }
         h1, h2 { color: #8d99ae; }
-        a { color: #d90429; text-decoration: none; font-weight: bold; }
+        a { color: #93c5fd; text-decoration: none; font-weight: bold; }
         a:hover { text-decoration: underline; }
         .container { max-width: 800px; margin: auto; background-color: #43455f; padding: 20px; border-radius: 8px; }
         pre { background-color: #2b2d42; padding: 15px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
@@ -94,6 +161,7 @@ HTML_TEMPLATE = """
             <li><a href="/" target="_blank">/ (Home)</a> - RUM & basic APM trace.</li>
             <li><a href="/postgres_interaction" target="_blank">/postgres_interaction</a> - Inserts and selects from PostgreSQL.</li>
             <li><a href="/mysql_interaction" target="_blank">/mysql_interaction</a> - Inserts and selects from MySQL.</li>
+            <li><a href="/mssql_interaction" target="_blank">/mssql_interaction</a> - Inserts and selects from MSSQL.</li>
             <li><a href="/cpu_intensive" target="_blank">/cpu_intensive</a> - Simulates high CPU load.</li>
             <li><a href="/error" target="_blank">/error</a> - Triggers a 500 error to test error tracking.</li>
         </ul>
@@ -115,8 +183,8 @@ async def postgres_interaction():
     """Connects to PostgreSQL, inserts a visit, and retrieves the last 10."""
     try:
         conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
-        await conn.execute("INSERT INTO web_visits_postgres DEFAULT VALUES;")
-        visits = await conn.fetch("SELECT id, visit_time FROM web_visits_postgres ORDER BY visit_time DESC LIMIT 10;")
+        await conn.execute("INSERT INTO web_visits DEFAULT VALUES;")
+        visits = await conn.fetch("SELECT id, visit_time FROM web_visits ORDER BY visit_time DESC LIMIT 10;")
         await conn.close()
         return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
     except Exception as e:
@@ -126,7 +194,7 @@ async def postgres_interaction():
 async def mysql_interaction():
     """Connects to MySQL, inserts a visit, and retrieves the last 10."""
     try:
-        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME)
+        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME, autocommit=True)
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("INSERT INTO web_visits_mysql () VALUES ();")
             await cur.execute("SELECT id, visit_time FROM web_visits_mysql ORDER BY visit_time DESC LIMIT 10;")
@@ -135,6 +203,37 @@ async def mysql_interaction():
         return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"MySQL connection failed: {e}")
+
+@app.get("/mssql_interaction")
+async def mssql_interaction():
+    """Connects to MSSQL, inserts a visit, and retrieves the last 10."""
+    dsn = (
+        f"Driver={{{MSSQL_DRIVER}}};"
+        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
+        f"Database={MSSQL_NAME};"
+        f"UID={MSSQL_USER};"
+        f"PWD={MSSQL_PASS};"
+        "Encrypt=no;"
+        "TrustServerCertificate=yes;"
+    )
+    try:
+        conn = await aioodbc.connect(dsn=dsn, autocommit=True)
+        cur = await conn.cursor()
+        await cur.execute("INSERT INTO web_visits_mssql DEFAULT VALUES;")
+        await cur.execute("SELECT TOP 10 id, visit_time FROM web_visits_mssql ORDER BY visit_time DESC;")
+        
+        # Manually construct dicts from the result rows
+        columns = [column[0] for column in cur.description]
+        visits = [dict(zip(columns, row)) for row in await cur.fetchall()]
+        
+        await cur.close()
+        await conn.close()
+        # Convert datetime objects to ISO format strings for JSON serialization
+        for v in visits:
+            v['visit_time'] = v['visit_time'].isoformat()
+        return visits
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MSSQL connection failed: {e}")
 
 
 @app.get("/cpu_intensive")
@@ -156,6 +255,7 @@ async def run_load_generation():
         f"http://localhost:{APP_PORT}/",
         f"http://localhost:{APP_PORT}/postgres_interaction",
         f"http://localhost:{APP_PORT}/mysql_interaction",
+        f"http://localhost:{APP_PORT}/mssql_interaction",
         f"http://localhost:{APP_PORT}/cpu_intensive",
         f"http://localhost:{APP_PORT}/error"
     ]
@@ -164,7 +264,7 @@ async def run_load_generation():
         while asyncio.time() - start_time < 60:
             try:
                 endpoint = random.choice(endpoints)
-                await client.get(endpoint, timeout=5)
+                await client.get(endpoint, timeout=10) # Increased timeout for slower MSSQL
             except httpx.RequestError as e:
                 print(f"Request failed (as expected for error endpoint or timeout): {e}")
             await asyncio.sleep(random.uniform(0.1, 0.5))
@@ -175,3 +275,4 @@ async def generate_load():
     """Starts the load generation as a background task."""
     asyncio.create_task(run_load_generation())
     return {"message": "🚀 Load generation started in the background for 60 seconds!"}
+
