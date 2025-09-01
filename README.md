@@ -17,7 +17,6 @@ ec2-db-quick/
 ├── app.py                    # The main FastAPI application
 ├── requirements.txt          # Python dependencies
 └── README.md                 # This setup guide
-
 ```
 
 🚀 Deployment Options
@@ -44,8 +43,7 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
     ```
     export AWS_REGION="us-west-1"
     export KEY_PAIR_NAME="your-key-pair-name"
-    export REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
-
+    export REPO_URL="https://github.com/your-username/ec2-db-quick.git"
     ```
 
     **For Windows (Command Prompt):**
@@ -53,22 +51,19 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
     ```
     set AWS_REGION="us-west-1"
     set KEY_PAIR_NAME="your-key-pair-name"
-    set REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
-
+    set REPO_URL="https://github.com/your-username/ec2-db-quick.git"
     ```
 
 2.  **Make the script executable:**
 
     ```
     chmod +x aws_deploy.sh
-
     ```
 
 3.  **Run the script from your local terminal.**
 
     ```
     ./aws_deploy.sh
-
     ```
 
     The script will create the EC2 instance, output its public IP, and clone the repository.
@@ -86,7 +81,6 @@ Use this method if you already have an EC2 instance running and prefer to set up
     ```
     # Replace the path to your .pem file and the public IP address
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
-
     ```
 
 2.  **Clone the repository (if not done by `aws_deploy.sh`):**
@@ -104,7 +98,6 @@ Use this method if you already have an EC2 instance running and prefer to set up
     ```
     chmod +x local_docker_install.sh
     ./local_docker_install.sh
-
     ```
 
 2.  **IMPORTANT:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
@@ -118,7 +111,6 @@ With Docker and Docker Compose installed, you can now start the application and 
     ```
     cd ec2-db-quick
     docker compose up --build -d
-
     ```
 
 2.  **Check the status:** You can see the running containers with `docker compose ps`.
@@ -129,7 +121,6 @@ To stop and remove all containers, networks, and volumes, run:
 
 ```
 docker compose down
-
 ```
 
 ### Optional: Install and Configure an Observability Agent
