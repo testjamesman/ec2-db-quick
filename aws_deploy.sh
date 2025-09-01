@@ -4,38 +4,63 @@
 # using the AWS CLI for the EC2 DB Quick Test application.
 # It sources configuration from a .env file.
 
-set -e
+set -e # Exit immediately if a command exits with a non-zero status.
+set -o pipefail # Exit if any command in a pipeline fails.
 
 # --- Configuration ---
 # Source environment variables from .env file if it exists
 if [ -f .env ]; then
-  # The tr command removes carriage returns to prevent issues with files edited on Windows
-  export $(grep -v '^#' .env | tr -d '\r' | xargs)
+  # Use a more robust method for sourcing the .env file that handles spaces and special characters.
+  set -a
+  source <(cat .env | sed -e '/^#/d;/^\s*$/d' -e "s/'/'\\\''/g" -e "s/=\(.*\)/='\1'/g")
+  set +a
+else
+  echo "❌ Error: .env file not found. Please create one from .env.sample."
+  exit 1
 fi
 
 # Check for required environment variables
 if [ -z "$KEY_PAIR_NAME" ] || [ -z "$REPO_URL" ] || [ -z "$AWS_REGION" ]; then
-  echo "Error: Required environment variables are not set."
-  echo "Please create a .env file from .env.sample and fill in the values."
+  echo "❌ Error: Required environment variables are not set in your .env file."
+  echo "Please ensure KEY_PAIR_NAME, REPO_URL, and AWS_REGION are defined."
   exit 1
 fi
 
 echo "✅ Configuration loaded from .env file."
+echo "---"
+echo "Using the following configuration:"
+echo "  AWS_REGION:    $AWS_REGION"
+echo "  KEY_PAIR_NAME: $KEY_PAIR_NAME"
+echo "  REPO_URL:      $REPO_URL"
+echo "---"
 
 # --- Environment Setup ---
-# Get the user's public IP address for the security group
+echo "--> Fetching your public IP address..."
 MY_IP=$(curl -s http://checkip.amazon.com)
+if [ -z "$MY_IP" ]; then
+    echo "❌ Error: Could not determine public IP address. Please check your internet connection."
+    exit 1
+fi
+
 echo "🔑 Using Key Pair: $KEY_PAIR_NAME"
 echo "🌍 Your public IP for SSH access is: $MY_IP"
 echo "📍 Deploying to AWS Region: $AWS_REGION"
 
 # --- AWS CLI Commands ---
-echo "--> Creating Security Group 'ec2-db-quick-sg'..."
-SG_ID=$(aws ec2 create-security-group --group-name ec2-db-quick-sg --description "Allow SSH and HTTP for test app" --region $AWS_REGION --output text)
+SG_NAME="ec2-db-quick-sg"
+echo "--> Checking for existing Security Group '$SG_NAME'..."
+# Check if the security group already exists to prevent an error on re-running the script.
+SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$AWS_REGION" --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)
 
-echo "--> Authorizing inbound rules for Security Group..."
-aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 22 --cidr "$MY_IP/32" --region $AWS_REGION
-aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region $AWS_REGION
+if [ -z "$SG_ID" ]; then
+  echo "--> Security Group not found. Creating '$SG_NAME'..."
+  SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Allow SSH and HTTP for test app" --region "$AWS_REGION" --output text)
+  echo "--> Authorizing inbound rules for new Security Group..."
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION"
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION"
+else
+  echo "--> Security Group '$SG_NAME' already exists with ID: $SG_ID. Skipping creation."
+fi
 
 echo "--> Launching EC2 instance (t2.micro with Amazon Linux 2023)..."
 
@@ -65,15 +90,15 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --security-group-ids "$SG_ID" \
   --user-data "$USER_DATA" \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ec2-db-quick-app}]' \
-  --region $AWS_REGION \
+  --region "$AWS_REGION" \
   --query "Instances[0].InstanceId" \
   --output text)
   
 echo "✅ EC2 instance is launching with ID: $INSTANCE_ID"
 echo "--> Waiting for instance to enter the 'running' state..."
-aws ec2 wait instance-running --instance-ids $INSTANCE_ID --region $AWS_REGION
+aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
 
-PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --region $AWS_REGION --output text)
+PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query "Reservations[0].Instances[0].PublicIpAddress" --region "$AWS_REGION" --output text)
 
 echo "========================================================================"
 echo "✅ DEPLOYMENT COMPLETE!"
