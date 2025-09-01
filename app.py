@@ -34,7 +34,6 @@ MSSQL_PORT = int(os.getenv("MSSQL_PORT", 1433))
 MSSQL_NAME = os.getenv("MSSQL_NAME", "ec2_db_quick_test")
 MSSQL_USER = os.getenv("MSSQL_USER", "sa")
 MSSQL_PASS = os.getenv("MSSQL_PASS", "aStrongPassword123!")
-# Note: The ODBC Driver version may vary. This is for the one installed in the Dockerfile.
 MSSQL_DRIVER = os.getenv("MSSQL_DRIVER", "ODBC Driver 18 for SQL Server")
 
 
@@ -88,14 +87,58 @@ async def init_mysql_db():
                 print("🔴 MySQL initialization failed after all retries.")
 
 async def init_mssql_db():
-    """Initializes MSSQL by creating the necessary table, with retries."""
-    retries = 10  # MSSQL can be slower to start
+    """
+    Initializes MSSQL. First, it ensures the database exists by connecting to the
+    'master' database, then it connects to the target database to create the table.
+    """
+    retries = 10
     delay = 5
-    # For aioodbc, we need to build a DSN (connection string)
-    dsn = (
+
+    # --- Step 1: Ensure the database exists by connecting to the master DB ---
+    master_dsn = (
         f"Driver={{{MSSQL_DRIVER}}};"
         f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
-        f"Database={MSSQL_NAME};"
+        f"Database=master;"  # Connect to master DB first
+        f"UID={MSSQL_USER};"
+        f"PWD={MSSQL_PASS};"
+        "Encrypt=no;"
+        "TrustServerCertificate=yes;"
+    )
+    db_exists = False
+    for i in range(retries):
+        try:
+            conn = await aioodbc.connect(dsn=master_dsn, autocommit=True)
+            cur = await conn.cursor()
+            # Check if database exists
+            await cur.execute(f"SELECT name FROM sys.databases WHERE name = N'{MSSQL_NAME}'")
+            if await cur.fetchone():
+                print(f"✅ MSSQL database '{MSSQL_NAME}' already exists.")
+                db_exists = True
+            else:
+                print(f"--> MSSQL database '{MSSQL_NAME}' not found. Creating it...")
+                await cur.execute(f"CREATE DATABASE {MSSQL_NAME}")
+                print(f"✅ MSSQL database '{MSSQL_NAME}' created successfully.")
+                db_exists = True
+            
+            await cur.close()
+            await conn.close()
+            break  # Exit retry loop on success
+        except Exception as e:
+            print(f"🔴 Could not connect to MSSQL master DB (attempt {i+1}/{retries}): {e}")
+            if i < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                print("🔴 MSSQL master connection failed after all retries. Cannot create database.")
+                return  # Stop if we can't even connect to master
+
+    if not db_exists:
+        return  # Cannot proceed if database was not created
+
+    # --- Step 2: Connect to the target database and create the table ---
+    app_dsn = (
+        f"Driver={{{MSSQL_DRIVER}}};"
+        f"Server=tcp:{MSSQL_HOST},{MSSQL_PORT};"
+        f"Database={MSSQL_NAME};"  # Now connect to the correct DB
         f"UID={MSSQL_USER};"
         f"PWD={MSSQL_PASS};"
         "Encrypt=no;"
@@ -103,7 +146,7 @@ async def init_mssql_db():
     )
     for i in range(retries):
         try:
-            conn = await aioodbc.connect(dsn=dsn, autocommit=True)
+            conn = await aioodbc.connect(dsn=app_dsn, autocommit=True)
             cur = await conn.cursor()
             # Check if table exists before creating
             await cur.execute("""
@@ -115,14 +158,14 @@ async def init_mssql_db():
             """)
             await cur.close()
             await conn.close()
-            print(f"✅ MSSQL database initialized successfully on attempt {i+1}.")
+            print(f"✅ MSSQL table 'web_visits_mssql' initialized successfully on attempt {i+1}.")
             return
         except Exception as e:
-            print(f"🔴 Could not initialize MSSQL (attempt {i+1}/{retries}): {e}")
+            print(f"🔴 Could not initialize MSSQL table (attempt {i+1}/{retries}): {e}")
             if i < retries - 1:
                 await asyncio.sleep(delay)
             else:
-                print("🔴 MSSQL initialization failed after all retries.")
+                print("🔴 MSSQL table initialization failed after all retries.")
 
 
 @app.on_event("startup")
@@ -142,7 +185,7 @@ HTML_TEMPLATE = """
     <title>O11y Test App</title>
     <!-- ⬇️ PASTE YOUR RUM SNIPPET HERE ⬇️ -->
 
-    <!-- ⬆️ PASTE YOUR RUM SNIPPET HERE ⬆️ -->
+    <!-- ⬆️ PASTE YOUR RUM SNIPPET HERE ⬇️ -->
     <style>
         body { font-family: sans-serif; background-color: #2b2d42; color: #edf2f4; margin: 40px; }
         h1, h2 { color: #8d99ae; }
@@ -220,7 +263,12 @@ async def mssql_interaction():
         conn = await aioodbc.connect(dsn=dsn, autocommit=True)
         cur = await conn.cursor()
         await cur.execute("INSERT INTO web_visits_mssql DEFAULT VALUES;")
-        await cur.execute("SELECT TOP 10 id, visit_time FROM web_visits_mssql ORDER BY visit_time DESC;")
+        # Cast the DATETIMEOFFSET to a string (ISO 8601 format) to avoid driver issues.
+        await cur.execute("""
+            SELECT TOP 10 id, CONVERT(VARCHAR(34), visit_time, 127) as visit_time 
+            FROM web_visits_mssql 
+            ORDER BY visit_time DESC;
+        """)
         
         # Manually construct dicts from the result rows
         columns = [column[0] for column in cur.description]
@@ -228,9 +276,6 @@ async def mssql_interaction():
         
         await cur.close()
         await conn.close()
-        # Convert datetime objects to ISO format strings for JSON serialization
-        for v in visits:
-            v['visit_time'] = v['visit_time'].isoformat()
         return visits
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"MSSQL connection failed: {e}")
@@ -275,4 +320,3 @@ async def generate_load():
     """Starts the load generation as a background task."""
     asyncio.create_task(run_load_generation())
     return {"message": "🚀 Load generation started in the background for 60 seconds!"}
-
