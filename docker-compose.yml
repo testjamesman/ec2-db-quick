@@ -6,11 +6,9 @@ services:
     depends_on:
       - postgres-db
       - mysql-db
-      - mssql-db
     environment:
       - PG_HOST=postgres-db
       - MYSQL_HOST=mysql-db
-      - MSSQL_HOST=mssql-db
 
   postgres-db:
     image: postgres:15
@@ -35,18 +33,6 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
 
-  mssql-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=aStrongPassword123!
-      - MSSQL_PID=Developer
-    ports:
-      - "1433:1433"
-    volumes:
-      - mssql-data:/var/opt/mssql
-
 volumes:
   postgres-data:
   mysql-data:
-  mssql-data:

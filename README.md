@@ -1,7 +1,7 @@
 EC2 DB Quick Test Application
 =============================
 
-This application provides a set of endpoints designed to generate various types of telemetry data for testing an observability vendor integration. It runs entirely within Docker containers managed by Docker Compose.
+This application provides a set of endpoints designed to generate various types of telemetry data for testing an observability vendor integration. It runs entirely within Docker containers managed by Docker Compose, utilizing PostgreSQL and MySQL databases.
 
 > **⚠️ Cost Warning:** This demo uses a `t3.medium` EC2 instance by default, which is **outside the AWS Free Tier**. To avoid unexpected charges, please ensure you terminate the EC2 instance using the AWS Console or by running `docker compose down` and then shutting down the instance when you are finished with your testing.
 
@@ -12,7 +12,7 @@ This application provides a set of endpoints designed to generate various types 
 ec2-db-quick/
 ├── aws_deploy.sh           # Automated AWS EC2 deployment script
 ├── local_docker_install.sh # Script to install Docker and DB clients on the EC2 host
-├── docker-compose.yml      # Manages the app and db containers
+├── docker-compose.yml      # Manages the app, postgres, and mysql containers
 ├── Dockerfile              # Defines the Python application container
 ├── app.py                  # The main FastAPI application
 ├── requirements.txt        # Python dependencies
@@ -103,24 +103,13 @@ After the containers are running, you can connect to each database directly from
 **Connect to PostgreSQL:**
 
 ```
-psql --host=localhost --username=postgres --dbname=ec2_db_quick_test
+export PGPASSWORD="postgres" & psql --host=localhost --username=postgres --dbname=ec2_db_quick_test
 
 ```
-
-*(Enter the password `postgres` when prompted.)*
 
 **Connect to MySQL:**
 
 ```
-mysql --host=127.0.0.1 --user=mysql_user -p --database=ec2_db_quick_test
-
-```
-
-*(Enter the password `mysql_password` when prompted.)*
-
-**Connect to MSSQL:**  *Note: The MSSQL tools may require you to add `/opt/mssql-tools18/bin/` to your PATH. You can do this by running `export PATH="$PATH:/opt/mssql-tools18/bin"`.*
-
-```
-sqlcmd -S localhost -U sa -P 'aStrongPassword123!' -d ec2_db_quick_test
+mysql --host=127.0.0.1 --user=mysql_user -pmysql_password --database=ec2_db_quick_test
 
 ```

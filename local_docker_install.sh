@@ -29,23 +29,8 @@ sudo dnf install -y postgresql15
 echo "--> Installing MySQL client..."
 sudo dnf install -y mariadb105
 
-# Install MSSQL client (sqlcmd)
-echo "--> Installing Microsoft SQL Server client..."
-# Import the public GPG keys
-sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-
-# Add the Microsoft SQL Server RHEL repository (for RHEL 8, which is often compatible with AL2023)
-curl https://packages.microsoft.com/config/rhel/8/prod.repo | sudo tee /etc/yum.repos.d/msprod.repo
-
-# Install mssql-tools and unixODBC-devel
-sudo ACCEPT_EULA=Y yum install -y mssql-tools unixODBC-devel
-
-# Add sqlcmd and bcp to your PATH for convenience
-echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bash_profile
-source ~/.bash_profile
-
 echo "============================================================"
-echo "✅ Setup complete!"
+echo "✅ Setup complete! Refreshing the shell session..."
 echo "You can now run 'docker compose up --build -d' to start the application."
 echo "============================================================"
 
