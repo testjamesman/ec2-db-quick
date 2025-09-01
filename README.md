@@ -8,13 +8,13 @@ This application provides a set of endpoints designed to generate various types 
 
 ```
 ec2-db-quick/
-├── aws_deploy.sh           # Automated AWS EC2 deployment script
-├── local_docker_install.sh # Script to install Docker on a host
-├── docker-compose.yml      # Manages the app and all db containers
-├── Dockerfile              # Defines the Python application container
-├── app.py                  # The main FastAPI application
-├── requirements.txt        # Python dependencies
-└── README.md               # This setup guide
+├── aws_deploy.sh             # Automated AWS EC2 deployment script
+├── local_docker_install.sh   # Script to install Docker on a host
+├── docker-compose.yml        # Manages the app and all db containers
+├── Dockerfile                # Defines the Python application container
+├── app.py                    # The main FastAPI application
+├── requirements.txt          # Python dependencies
+└── README.md                 # This setup guide
 
 ```
 
