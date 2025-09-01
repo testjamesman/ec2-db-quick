@@ -1,189 +1,177 @@
 import os
-import asyncio
 import random
+import asyncio
 import httpx
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.responses import HTMLResponse
 import asyncpg
-import logging
-
-# --- Logging Configuration ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import aiomysql
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
 
-# --- Database Configuration ---
-# Fetch DB config from environment variables.
-# The default DB_HOST is now 'db' to match the docker-compose service name.
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_NAME = os.getenv("DB_NAME", "ec2_db_quick_test")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASS", "postgres")
-DATABASE_URL = f"postgres://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}"
+# --- Application Configuration ---
+APP_PORT = int(os.getenv("APP_PORT", 8000))
 
-# --- Database Pool ---
-# A connection pool is created at startup and managed by FastAPI
-db_pool = None
+# --- PostgreSQL Configuration ---
+PG_HOST = os.getenv("PG_HOST", "localhost")
+PG_PORT = int(os.getenv("PG_PORT", 5432))
+PG_NAME = os.getenv("PG_NAME", "ec2_db_quick_test")
+PG_USER = os.getenv("PG_USER", "postgres")
+PG_PASS = os.getenv("PG_PASS", "postgres")
+
+# --- MySQL Configuration ---
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
+MYSQL_NAME = os.getenv("MYSQL_NAME", "ec2_db_quick_test")
+MYSQL_USER = os.getenv("MYSQL_USER", "mysql_user")
+MYSQL_PASS = os.getenv("MYSQL_PASS", "mysql_password")
+
+
+# --- Database Initialization ---
+async def init_postgres_db():
+    """Initializes PostgreSQL by creating the necessary table."""
+    try:
+        conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS web_visits_postgres (
+                id SERIAL PRIMARY KEY,
+                visit_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        await conn.close()
+        print("✅ PostgreSQL database initialized successfully.")
+    except Exception as e:
+        print(f"🔴 Could not initialize PostgreSQL database: {e}")
+
+async def init_mysql_db():
+    """Initializes MySQL by creating the necessary table."""
+    try:
+        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME)
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS web_visits_mysql (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+        conn.close()
+        print("✅ MySQL database initialized successfully.")
+    except Exception as e:
+        print(f"🔴 Could not initialize MySQL database: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    On application startup, connect to the database and create the necessary table.
-    Includes a retry mechanism to handle the database container starting up slower than the app.
-    """
-    global db_pool
-    attempts = 5
-    while attempts > 0:
-        try:
-            db_pool = await asyncpg.create_pool(DATABASE_URL)
-            async with db_pool.acquire() as connection:
-                logger.info("✅ Database connection established.")
-                await connection.execute("""
-                    CREATE TABLE IF NOT EXISTS web_visits (
-                        id SERIAL PRIMARY KEY,
-                        visit_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                logger.info("✅ Database initialized successfully.")
-                return # Exit the loop on success
-        except Exception as e:
-            attempts -= 1
-            logger.error(f"🔴 Could not connect to database: {e}. Retrying in 5 seconds... ({attempts} attempts left)")
-            await asyncio.sleep(5)
-    
-    # If all attempts fail
-    db_pool = None
-    logger.critical("🔴 All attempts to connect to the database failed. The application will run without database connectivity.")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    On application shutdown, close the database connection pool.
-    """
-    if db_pool:
-        await db_pool.close()
-        logger.info("Database connection pool closed.")
+    """On application startup, initialize both databases."""
+    await init_postgres_db()
+    await init_mysql_db()
 
 # --- HTML Template for the Homepage ---
-HTML_TEMPLATE_STRING = """
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>EC2 DB Quick Test App</title>
-    <!-- ⬇️ PASTE YOUR VENDOR'S RUM SNIPPET HERE ⬇️ -->
+    <title>O11y Test App</title>
+    <!-- ⬇️ PASTE YOUR RUM SNIPPET HERE ⬇️ -->
 
-    <!-- ⬆️ PASTE YOUR VENDOR'S RUM SNIPPET HERE ⬆️ -->
+    <!-- ⬆️ PASTE YOUR RUM SNIPPET HERE ⬆️ -->
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #2b2d42; color: #edf2f4; margin: 40px; line-height: 1.6; }
-        h1, h2 { color: #8d99ae; border-bottom: 1px solid #4a4c6a; padding-bottom: 10px; }
-        a { color: #ef233c; text-decoration: none; font-weight: bold; }
+        body { font-family: sans-serif; background-color: #2b2d42; color: #edf2f4; margin: 40px; }
+        h1, h2 { color: #8d99ae; }
+        a { color: #d90429; text-decoration: none; font-weight: bold; }
         a:hover { text-decoration: underline; }
-        .container { max-width: 800px; margin: auto; background-color: #43455f; padding: 20px 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        ul { list-style: none; padding-left: 0; }
-        li { background-color: #2b2d42; margin-bottom: 10px; padding: 10px 15px; border-radius: 5px; }
-        code { background-color: #1a1b26; padding: 2px 5px; border-radius: 3px; font-family: "SF Mono", "Fira Code", "Consolas", monospace; }
+        .container { max-width: 800px; margin: auto; background-color: #43455f; padding: 20px; border-radius: 8px; }
+        pre { background-color: #2b2d42; padding: 15px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🚀 EC2 DB Quick Test App</h1>
-        <p>Use these endpoints to generate telemetry data for your observability platform.</p>
-        <h2>API Endpoints:</h2>
+        <h1>🚀 O11y Test Application</h1>
+        <p>Use these endpoints to generate telemetry data.</p>
+        <h2>Endpoints:</h2>
         <ul>
-            <li><a href="/" target="_blank"><code>/</code></a> - Renders this page for RUM & basic APM trace.</li>
-            <li><a href="/db_interaction" target="_blank"><code>/db_interaction</code></a> - Inserts a record and reads the last 10 from PostgreSQL.</li>
-            <li><a href="/cpu_intensive" target="_blank"><code>/cpu_intensive</code></a> - Simulates a high CPU workload.</li>
-            <li><a href="/error" target="_blank"><code>/error</code></a> - Triggers a 500 error for error tracking.</li>
+            <li><a href="/" target="_blank">/ (Home)</a> - RUM & basic APM trace.</li>
+            <li><a href="/postgres_interaction" target="_blank">/postgres_interaction</a> - Inserts and selects from PostgreSQL.</li>
+            <li><a href="/mysql_interaction" target="_blank">/mysql_interaction</a> - Inserts and selects from MySQL.</li>
+            <li><a href="/cpu_intensive" target="_blank">/cpu_intensive</a> - Simulates high CPU load.</li>
+            <li><a href="/error" target="_blank">/error</a> - Triggers a 500 error to test error tracking.</li>
         </ul>
         <h2>Actions:</h2>
-        <p><a href="/generate_load">/generate_load</a> - Click to start a 60-second load generation task in the background.</p>
+        <p><a href="/generate_load">/generate_load</a> - Click here to start a 60-second load generation task in the background.</p>
     </div>
 </body>
 </html>
 """
 
 # --- FastAPI Endpoints ---
-
 @app.get("/", response_class=HTMLResponse)
 async def home():
     """Homepage endpoint. This is where you'll test RUM."""
-    return HTMLResponse(content=HTML_TEMPLATE_STRING)
+    return HTML_TEMPLATE
 
-@app.get("/db_interaction")
-async def db_interaction():
-    """
-    Connects to the database via the pool, inserts a new visit,
-    and retrieves the last 10 visits asynchronously.
-    """
-    if not db_pool:
-        return {"error": "Database connection pool not available"}, 503
+@app.get("/postgres_interaction")
+async def postgres_interaction():
+    """Connects to PostgreSQL, inserts a visit, and retrieves the last 10."""
+    try:
+        conn = await asyncpg.connect(user=PG_USER, password=PG_PASS, database=PG_NAME, host=PG_HOST, port=PG_PORT)
+        await conn.execute("INSERT INTO web_visits_postgres DEFAULT VALUES;")
+        visits = await conn.fetch("SELECT id, visit_time FROM web_visits_postgres ORDER BY visit_time DESC LIMIT 10;")
+        await conn.close()
+        return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PostgreSQL connection failed: {e}")
 
-    async with db_pool.acquire() as connection:
-        # Write and Read operations
-        await connection.execute("INSERT INTO web_visits DEFAULT VALUES;")
-        records = await connection.fetch("SELECT id, visit_time FROM web_visits ORDER BY visit_time DESC LIMIT 10;")
-    
-    return [{"id": r['id'], "time": r['visit_time'].isoformat()} for r in records]
+@app.get("/mysql_interaction")
+async def mysql_interaction():
+    """Connects to MySQL, inserts a visit, and retrieves the last 10."""
+    try:
+        conn = await aiomysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASS, db=MYSQL_NAME)
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("INSERT INTO web_visits_mysql () VALUES ();")
+            await cur.execute("SELECT id, visit_time FROM web_visits_mysql ORDER BY visit_time DESC LIMIT 10;")
+            visits = await cur.fetchall()
+        conn.close()
+        return [{"id": v['id'], "time": v['visit_time'].isoformat()} for v in visits]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MySQL connection failed: {e}")
 
 
 @app.get("/cpu_intensive")
 async def cpu_intensive_task():
-    """
-    Simulates a CPU-bound task.
-    This runs in a separate thread pool to avoid blocking the async event loop.
-    """
-    def sync_cpu_task():
-        # A simple, inefficient calculation to consume CPU
-        return sum(i*i for i in range(2_000_000))
-
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, sync_cpu_task)
-    
-    return {
-        "message": "CPU intensive task complete",
-        "result": result
-    }
+    """Simulates a CPU-bound task."""
+    result = sum(i*i for i in range(2_000_000))
+    return {"message": "CPU intensive task complete", "result": result}
 
 @app.get("/error")
 async def trigger_error():
     """Raises an exception to test error tracking."""
-    raise ValueError("This is an intentional test error from the FastAPI app!")
+    raise ValueError("This is an intentional test error!")
 
 # --- Load Generation ---
-
-async def run_load_generation_task():
-    """The actual load generation logic."""
-    logger.info("🚦 Starting load generation for 60 seconds...")
-    # The app is running inside the docker network, so it can refer to itself as 'web'
-    base_url = "http://web:8000"
+async def run_load_generation():
+    """Target function for the background task to generate load."""
+    print("🚦 Starting load generation for 60 seconds...")
     endpoints = [
-        f"{base_url}/",
-        f"{base_url}/db_interaction",
-        f"{base_url}/cpu_intensive",
-        f"{base_url}/error"
+        f"http://localhost:{APP_PORT}/",
+        f"http://localhost:{APP_PORT}/postgres_interaction",
+        f"http://localhost:{APP_PORT}/mysql_interaction",
+        f"http://localhost:{APP_PORT}/cpu_intensive",
+        f"http://localhost:{APP_PORT}/error"
     ]
-    start_time = asyncio.get_event_loop().time()
-    
     async with httpx.AsyncClient() as client:
-        while asyncio.get_event_loop().time() - start_time < 60:
+        start_time = asyncio.time()
+        while asyncio.time() - start_time < 60:
             try:
                 endpoint = random.choice(endpoints)
-                await client.get(endpoint, timeout=5.0)
+                await client.get(endpoint, timeout=5)
             except httpx.RequestError as e:
-                logger.warning(f"Request failed (as expected for error endpoint or timeout): {e}")
-            await asyncio.sleep(random.uniform(0.1, 0.4))
-            
-    logger.info("🏁 Load generation finished.")
+                print(f"Request failed (as expected for error endpoint or timeout): {e}")
+            await asyncio.sleep(random.uniform(0.1, 0.5))
+    print("🏁 Load generation finished.")
 
 @app.get("/generate_load")
-async def generate_load(background_tasks: BackgroundTasks):
-    """
-    Starts the load generation as a background task.
-    Responds immediately to the user.
-    """
-    background_tasks.add_task(run_load_generation_task)
+async def generate_load():
+    """Starts the load generation as a background task."""
+    asyncio.create_task(run_load_generation())
     return {"message": "🚀 Load generation started in the background for 60 seconds!"}

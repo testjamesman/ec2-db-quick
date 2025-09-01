@@ -10,7 +10,7 @@ This application provides a set of endpoints designed to generate various types 
 ec2-db-quick/
 ├── aws_deploy.sh            # Automated AWS EC2 instance creation script
 ├── local_docker_install.sh  # Installs Docker & Compose on the EC2 host
-├── docker-compose.yml       # Manages the app and db containers
+├── docker-compose.yml       # Manages the app, postgres, and mysql containers
 ├── Dockerfile               # Defines the Python application container
 ├── app.py                   # The main FastAPI application
 ├── requirements.txt         # Python dependencies
@@ -82,15 +82,12 @@ Now, you will connect to the newly created instance to set up Docker and run the
 
     ```
 
-2.  **Clone the Repository:**
+2.  **Navigate to the Cloned Repository:** The application repository was automatically cloned for you when the instance was created. Navigate into the project directory (the name is based on your repo URL).
 
     ```
-    git clone $REPO_URL
     cd ec2-db-quick
 
     ```
-
-    *(Note: You can get the `$REPO_URL` by running `echo $REPO_URL` on your local machine if you forget it)*
 
 3.  **Install Docker and Docker Compose:** Run the installation script.
 

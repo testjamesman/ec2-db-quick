@@ -30,7 +30,7 @@ echo "---"
 # --- Environment Setup ---
 echo "--> Fetching your public IP address..."
 # Try the first service, if it fails, try the second one.
-if ! MY_IP=$(curl -s http://checkip.amazonaws.com); then
+if ! MY_IP=$(curl -s http://checkip.amazon.com); then
     echo "--> Primary IP check failed, trying fallback service..."
     MY_IP=$(curl -s https://ifconfig.me)
 fi
@@ -69,13 +69,27 @@ fi
 
 echo "--> Launching EC2 instance (t2.micro with Amazon Linux 2023)..."
 
-# This command now launches a bare instance without a UserData script.
-# Configuration and application startup will be done manually via SSH.
+# UserData script to be executed on instance launch.
+# This script installs git and clones the application repository.
+USER_DATA=$(cat <<EOF
+#!/bin/bash
+dnf update -y
+dnf install -y git
+cd /home/ec2-user
+git clone $REPO_URL
+REPO_NAME=\$(basename $REPO_URL .git)
+chown -R ec2-user:ec2-user \$REPO_NAME
+EOF
+)
+
+# This command now launches the instance with a UserData script
+# to prepare the code repository on boot.
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
   --instance-type t2.micro \
   --key-name "$KEY_PAIR_NAME" \
   --security-group-ids "$SG_ID" \
+  --user-data "$USER_DATA" \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ec2-db-quick-app}]' \
   --region "$AWS_REGION" \
   --query "Instances[0].InstanceId" \

@@ -1,31 +1,49 @@
 services:
-  db:
-    image: postgres:15
-    container_name: ec2-db-quick-postgres
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=ec2_db_quick_test
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ec2_db_quick_test"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  web:
+  app:
     build: .
-    container_name: ec2-db-quick-app
     ports:
       - "8000:8000"
     environment:
-      - DB_HOST=db # Connect to the 'db' service
+      - APP_PORT=8000
+      - PG_HOST=postgres-db
+      - PG_NAME=ec2_db_quick_test
+      - PG_USER=postgres
+      - PG_PASS=postgres
+      - MYSQL_HOST=mysql-db
+      - MYSQL_NAME=ec2_db_quick_test
+      - MYSQL_USER=mysql_user
+      - MYSQL_PASS=mysql_password
     depends_on:
-      db:
+      postgres-db:
+        condition: service_healthy
+      mysql-db:
         condition: service_healthy
 
-volumes:
-  postgres_data:
+  postgres-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=ec2_db_quick_test
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ec2_db_quick_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mysql-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=ec2_db_quick_test
+      - MYSQL_USER=mysql_user
+      - MYSQL_PASSWORD=mysql_password
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

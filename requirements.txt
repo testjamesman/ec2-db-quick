@@ -2,8 +2,9 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 
-# Database Driver (async)
+# Database Drivers (async)
 asyncpg==0.29.0
+aiomysql==0.2.0
 
 # HTTP Client for Load Generation (async)
 httpx==0.27.0

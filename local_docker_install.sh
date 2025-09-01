@@ -24,8 +24,5 @@ sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 echo "--> Restarting Docker service..."
 sudo systemctl restart docker
 
-echo "--> Restarting group session..."
-sudo newgrp docker
-
 echo "✅ Docker and Docker Compose installation complete."
-docker --version && docker compose version
+sudo newgrp docker && docker --version && docker compose version
