@@ -1,21 +1,21 @@
 #!/bin/bash
-
+#
 # This script automates the creation of an EC2 instance and its dependencies
 # using the AWS CLI for the EC2 DB Quick Test application.
-# It reads configuration from environment variables.
 
-# It is critical to have these set commands. They ensure that the script
-# will exit immediately if any command fails, preventing it from continuing
-# in a broken or unpredictable state.
-set -e # Exit immediately if a command exits with a non-zero status.
-set -o pipefail # Exit if any command in a pipeline fails.
+# --- Configuration & Safety ---
+# Exit immediately if a command exits with a non-zero status.
+set -e
+# Treat unset variables as an error when substituting.
+set -u
+# Pipelines fail if any command fails, not just the last one.
+set -o pipefail
 
-# --- Configuration ---
-# Check for required environment variables from the user's OS
-if [ -z "$KEY_PAIR_NAME" ] || [ -z "$REPO_URL" ] || [ -z "$AWS_REGION" ]; then
+# --- Environment Variable Check ---
+# Check for required environment variables and provide guidance if they are missing.
+if [ -z "${KEY_PAIR_NAME-}" ] || [ -z "${REPO_URL-}" ] || [ -z "${AWS_REGION-}" ]; then
   echo "❌ Error: Required environment variables are not set."
-  echo "Please set AWS_REGION, KEY_PAIR_NAME, and REPO_URL in your environment."
-  echo "See the README.md for instructions."
+  echo "Please export AWS_REGION, KEY_PAIR_NAME, and REPO_URL before running."
   exit 1
 fi
 
@@ -29,15 +29,10 @@ echo "---"
 
 # --- Environment Setup ---
 echo "--> Fetching your public IP address..."
-# Try the first service, if it fails, try the second one.
-if ! MY_IP=$(curl -s http://checkip.amazon.com); then
-    echo "--> Primary IP check failed, trying fallback service..."
-    MY_IP=$(curl -s https://ifconfig.me)
-fi
-
-# If after both attempts, the IP is still empty, exit with an error.
+# Attempt to get IP from primary source, with a fallback to prevent script failure.
+MY_IP=$(curl -s http://checkip.amazonaws.com || curl -s https://ifconfig.me/ip)
 if [ -z "$MY_IP" ]; then
-    echo "❌ Error: Could not determine public IP address. Please check your internet connection or firewall settings."
+    echo "❌ Error: Could not determine public IP address. Please check your network connection."
     exit 1
 fi
 
@@ -48,48 +43,46 @@ echo "📍 Deploying to AWS Region: $AWS_REGION"
 # --- AWS CLI Commands ---
 SG_NAME="ec2-db-quick-sg"
 echo "--> Checking for existing Security Group '$SG_NAME'..."
-# Check if the security group already exists to prevent an error on re-running the script.
-SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$AWS_REGION" --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)
+
+# Check if the security group already exists to avoid errors on re-runs.
+SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --query "SecurityGroups[0].GroupId" --output text --region "$AWS_REGION" 2>/dev/null || true)
 
 if [ -z "$SG_ID" ]; then
-  echo "--> Security Group not found. Creating '$SG_NAME'..."
-  # Corrected command: Query specifically for the GroupId to avoid malformed output.
-  SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Allow SSH and HTTP for test app" --region "$AWS_REGION" --query "GroupId" --output text)
-  echo "--> Authorizing inbound rules for new Security Group..."
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION"
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION"
+    echo "--> Security Group not found. Creating '$SG_NAME'..."
+    SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Allow SSH and HTTP for test app" --region "$AWS_REGION" --query "GroupId" --output text)
+    echo "--> Authorizing inbound rules for new Security Group..."
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION"
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION"
 else
-  echo "--> Security Group '$SG_NAME' already exists with ID: $SG_ID."
-  echo "--> Ensuring inbound rules are correctly configured..."
-  # Attempt to add the rules. If they already exist, the command will fail,
-  # but '2>/dev/null || true' suppresses the error and allows the script to continue.
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION" 2>/dev/null || true
-  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+    echo "--> Security Group '$SG_NAME' already exists with ID: $SG_ID. Ensuring rules are present."
+    # Idempotently add rules; this will only add them if they don't already exist.
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION" 2>/dev/null || true
+    aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
 fi
 
-echo "--> Launching EC2 instance (t2.micro with Amazon Linux 2023)..."
 
-# UserData script to be executed on instance launch.
-# This script installs git and clones the application repository.
-USER_DATA=$(cat <<EOF
+echo "--> Launching EC2 instance (t3.medium with Amazon Linux 2023)..."
+
+# UserData script to be executed on instance launch
+USER_DATA=$(cat <<'EOF'
 #!/bin/bash
-dnf update -y
-dnf install -y git
+# Install git and clone the repository
+yum update -y
+yum install -y git
 cd /home/ec2-user
-git clone $REPO_URL
-REPO_NAME=\$(basename $REPO_URL .git)
-chown -R ec2-user:ec2-user \$REPO_NAME
+git clone "$REPO_URL"
 EOF
 )
 
-# This command now launches the instance with a UserData script
-# to prepare the code repository on boot.
+# Replace the placeholder in UserData with the actual REPO_URL
+USER_DATA_FINAL=$(echo "$USER_DATA" | sed "s|\$REPO_URL|$REPO_URL|g")
+
 INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
-  --instance-type t2.micro \
+  --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64 \
+  --instance-type t3.medium \
   --key-name "$KEY_PAIR_NAME" \
   --security-group-ids "$SG_ID" \
-  --user-data "$USER_DATA" \
+  --user-data "$USER_DATA_FINAL" \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ec2-db-quick-app}]' \
   --region "$AWS_REGION" \
   --query "Instances[0].InstanceId" \
@@ -102,13 +95,14 @@ aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGIO
 PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query "Reservations[0].Instances[0].PublicIpAddress" --region "$AWS_REGION" --output text)
 
 echo "========================================================================"
-echo "✅ EC2 INSTANCE CREATED!"
+echo "✅ DEPLOYMENT COMPLETE!"
 echo ""
 echo "Instance Public IP: $PUBLIC_IP"
 echo ""
-echo "Next steps:"
-echo "1. Connect to the instance via SSH:"
-echo "   ssh -i /path/to/your/$KEY_PAIR_NAME.pem ec2-user@$PUBLIC_IP"
-echo "2. Follow the setup instructions in the README to install Docker"
-echo "   and run the application."
+echo "To connect via SSH:"
+echo "ssh -i /path/to/your/$KEY_PAIR_NAME.pem ec2-user@$PUBLIC_IP"
+echo ""
+echo "Next, run the Docker installer on the EC2 instance, then start the app."
+echo "See the README.md for the next steps."
 echo "========================================================================"
+
