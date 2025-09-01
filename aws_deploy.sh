@@ -2,31 +2,21 @@
 
 # This script automates the creation of an EC2 instance and its dependencies
 # using the AWS CLI for the EC2 DB Quick Test application.
-# It sources configuration from a .env file.
+# It reads configuration from environment variables.
 
 set -e # Exit immediately if a command exits with a non-zero status.
 set -o pipefail # Exit if any command in a pipeline fails.
 
 # --- Configuration ---
-# Source environment variables from .env file if it exists
-if [ -f .env ]; then
-  # Use a more robust method for sourcing the .env file that handles spaces and special characters.
-  set -a
-  source <(cat .env | sed -e '/^#/d;/^\s*$/d' -e "s/'/'\\\''/g" -e "s/=\(.*\)/='\1'/g")
-  set +a
-else
-  echo "❌ Error: .env file not found. Please create one from .env.sample."
-  exit 1
-fi
-
-# Check for required environment variables
+# Check for required environment variables from the user's OS
 if [ -z "$KEY_PAIR_NAME" ] || [ -z "$REPO_URL" ] || [ -z "$AWS_REGION" ]; then
-  echo "❌ Error: Required environment variables are not set in your .env file."
-  echo "Please ensure KEY_PAIR_NAME, REPO_URL, and AWS_REGION are defined."
+  echo "❌ Error: Required environment variables are not set."
+  echo "Please set AWS_REGION, KEY_PAIR_NAME, and REPO_URL in your environment."
+  echo "See the README.md for instructions."
   exit 1
 fi
 
-echo "✅ Configuration loaded from .env file."
+echo "✅ Configuration loaded from environment variables."
 echo "---"
 echo "Using the following configuration:"
 echo "  AWS_REGION:    $AWS_REGION"

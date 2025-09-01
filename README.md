@@ -14,8 +14,6 @@ ec2-db-quick/
 ├── deploy.sh           # Manual dependency setup for an existing EC2
 ├── app.py              # The main FastAPI application
 ├── requirements.txt    # Python dependencies
-├── .gitignore          # Specifies files for git to ignore
-├── .env.sample         # Sample environment file
 └── README.md           # This setup guide
 
 ```
@@ -39,36 +37,47 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
 
 #### Steps
 
-1.  **Create your Environment File:** Copy the sample environment file to a new `.env` file. This file will securely store your configuration and will not be checked into git.
+1.  **Set Environment Variables:** Before running the script, you must export three environment variables in your terminal. These variables are only set for your current terminal session.
+
+    -   `AWS_REGION`: The AWS region to deploy to (e.g., `us-east-1`).
+
+    -   `KEY_PAIR_NAME`: The name of your existing EC2 key pair.
+
+    -   `REPO_URL`: The HTTPS URL of this git repository.
+
+    **On macOS or Linux:**
 
     ```
-    cp .env.sample .env
+    export AWS_REGION="us-east-1"
+    export KEY_PAIR_NAME="your-key-pair-name"
+    export REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
 
     ```
 
-2.  **Edit the `.env` file:** Open the newly created `.env` file and fill in the values for `AWS_REGION`, `KEY_PAIR_NAME`, and your `REPO_URL`.
+    **On Windows (PowerShell):**
 
-3.  **Make the script executable:**
+    ```
+    $env:AWS_REGION="us-east-1"
+    $env:KEY_PAIR_NAME="your-key-pair-name"
+    $env:REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
+
+    ```
+
+2.  **Make the script executable:**
 
     ```
     chmod +x aws_deploy.sh
 
     ```
 
-4.  **Run the script from your local terminal.** The script will now read the configuration from your `.env` file, create all necessary AWS resources, and start the application.
+3.  **Run the deployment script:**
 
     ```
     ./aws_deploy.sh
 
     ```
 
-5.  **Connect using SSH:** After the script completes, it will output the Public IP address of the new instance. You can use this to access the app and SSH to the host if needed.
-
-    ```
-    # Replace the path to your .pem file and the public IP address
-    ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
-
-    ```
+4.  **Connect and Access:** After the script completes, it will output the Public IP address of the new instance. Use this to access the application in your browser (`http://<public-ip>:8000`) or to connect via SSH.
 
 ### Option 2: Manual Deployment on an Existing EC2 Instance
 
@@ -78,7 +87,7 @@ Use this method if you already have an EC2 instance running and prefer to set up
 
 1.  **Find your instance's Public IP:** In the AWS EC2 Console, select your instance and find the "Public IPv4 address" in the details panel.
 
-2.  **Connect using SSH:** Use your terminal and the key pair you used to launch the instance to connect.
+2.  **Connect using SSH:**
 
     ```
     # Replace the path to your .pem file and the public IP address
@@ -88,7 +97,7 @@ Use this method if you already have an EC2 instance running and prefer to set up
 
 #### Step 2: Prepare the EC2 Instance
 
-1.  **Clone the repository to your EC2 instance:**
+1.  **Clone the repository:**
 
     ```
     git clone <your-repo-url>
@@ -96,25 +105,17 @@ Use this method if you already have an EC2 instance running and prefer to set up
 
     ```
 
-2.  **Make the dependency script executable:**
+2.  **Install dependencies:**
 
     ```
     chmod +x deploy.sh
-
-    ```
-
-3.  **Run the script to install Docker and Docker Compose:**
-
-    ```
     ./deploy.sh
 
     ```
 
-4.  **IMPORTANT:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
+3.  **IMPORTANT:** Log out and log back in to your EC2 instance for the Docker group permissions to apply.
 
 #### Step 3: Run the Application
-
-With Docker and Docker Compose installed, you can now start the application and database with a single command.
 
 1.  **Navigate to the project directory:**
 
@@ -123,56 +124,19 @@ With Docker and Docker Compose installed, you can now start the application and 
 
     ```
 
-2.  **Start the services:** The `--build` flag tells Docker Compose to build the application image from the `Dockerfile`. The `-d` flag runs the containers in the background (detached mode).
+2.  **Start the services:**
 
     ```
     docker-compose up --build -d
 
     ```
 
-3.  **Check the status:** You can see the running containers with `docker-compose ps`.
+### Optional: Install Observability Agent
 
-    ```
-    docker-compose ps
+Once the EC2 instance is running, you can install your observability vendor's agent directly on the host to monitor the system and the Docker containers.
 
-    ```
+1.  **SSH into the instance.**
 
-#### Step 4: Stop the Application
+2.  **Follow your vendor's instructions** to install the host agent.
 
-To stop and remove the containers, network, and volumes defined in the compose file, run:
-
-```
-docker-compose down
-
-```
-
-### Optional: Install and Configure an Observability Agent
-
-For full infrastructure monitoring, install your observability vendor's agent directly on the EC2 host. The agent will then monitor the host and the Docker containers running on it. This should be done *after* you've connected to the EC2 instance via SSH.
-
-1.  **Install the Agent:** Follow your vendor's instructions to install the host agent.
-
-2.  **Configure for Docker & Postgres:** Enable Docker monitoring in your agent's main configuration. Then, configure the PostgreSQL integration. Since the database port (`5432`) is mapped to the host, the agent can connect to it via `localhost`.
-
-    Example agent configuration for Postgres (e.g., `/etc/vendor-agent/conf.d/postgres.d/conf.yaml`):
-
-    ```yaml
-    # This is a generic example. Refer to your vendor's documentation.
-    instances:
-      - host: localhost # The agent connects to the port mapped on the host
-        port: 5432
-        username: postgres
-        password: postgres
-        dbm: true
-        dbname: ec2_db_quick_test
-        tags:
-          - "env:dev"
-          - "service:ec2-db-quick-db"
-    ```
-
-3.  **Restart the Agent:**
-
-    ```
-    # The service name will depend on your vendor
-    sudo systemctl restart <agent-service-name>
-    ```
+3.  **Configure the agent** for Docker and PostgreSQL monitoring. Since the database port (`5432`) is mapped to the host, the agent can connect to it via `localhost`.
