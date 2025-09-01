@@ -1,7 +1,7 @@
 EC2 DB Quick Test Application
 =============================
 
-This application provides a set of endpoints designed to generate various types of telemetry data for testing an observability vendor integration. It runs entirely within Docker containers managed by Docker Compose, providing test endpoints for PostgreSQL, MySQL, and Microsoft SQL Server.
+This application provides a set of endpoints designed to generate various types of telemetry data for testing an observability vendor integration. It runs entirely within Docker containers managed by Docker Compose.
 
 > **⚠️ Cost Warning:** This demo uses a `t3.medium` EC2 instance by default, which is **outside the AWS Free Tier**. To avoid unexpected charges, please ensure you terminate the EC2 instance using the AWS Console or by running `docker compose down` and then shutting down the instance when you are finished with your testing.
 
@@ -10,124 +10,117 @@ This application provides a set of endpoints designed to generate various types 
 
 ```
 ec2-db-quick/
-├── aws_deploy.sh             # Automated AWS EC2 deployment script
-├── local_docker_install.sh   # Script to install Docker on a host
-├── docker-compose.yml        # Manages the app and all db containers
-├── Dockerfile                # Defines the Python application container
-├── app.py                    # The main FastAPI application
-├── requirements.txt          # Python dependencies
-└── README.md                 # This setup guide
+├── aws_deploy.sh           # Automated AWS EC2 deployment script
+├── local_docker_install.sh # Script to install Docker and DB clients on the EC2 host
+├── docker-compose.yml      # Manages the app and db containers
+├── Dockerfile              # Defines the Python application container
+├── app.py                  # The main FastAPI application
+├── requirements.txt        # Python dependencies
+└── README.md               # This setup guide
+
 ```
 
-🚀 Deployment Options
----------------------
+🚀 Deployment
+-------------
 
-Choose one of the following methods to deploy the application.
+This guide will walk you through creating the EC2 instance and deploying the application.
 
-### Option 1: Automated EC2 Setup with AWS CLI (Recommended)
+### Step 1: Create the EC2 Instance (Local Machine)
 
-This method uses the AWS CLI to create and configure an EC2 instance from your local machine.
+This method uses the AWS CLI to create an EC2 instance from your local machine.
 
 #### Prerequisites
 
 1.  **AWS CLI Installed & Configured:** Ensure you have the [AWS CLI installed](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html "null") and [configured](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-quickstart.html "null") with your credentials.
 
-2.  **EC2 Key Pair:** You must have an existing [EC2 Key Pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html "null") in the AWS region you intend to use.
+2.  **EC2 Key Pair:** You must have an existing [EC2 Key Pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html "null") in the AWS region you intend to use. This is required for SSH access.
 
-#### Steps
+3.  **Local Git Clone:** You should have this repository cloned to your local machine.
 
-1.  **Set Environment Variables:** Before running the script, you must export the following environment variables in your terminal.
+#### Actions
 
-    **For macOS/Linux:**
+1.  **Set Environment Variables:** Before running the script, you must export the following environment variables in your local terminal.
+
+    **On macOS/Linux:**
 
     ```
     export AWS_REGION="us-west-1"
     export KEY_PAIR_NAME="your-key-pair-name"
-    export REPO_URL="https://github.com/your-username/ec2-db-quick.git"
+    export REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
+
     ```
 
-    **For Windows (Command Prompt):**
+    **On Windows (Command Prompt):**
 
     ```
     set AWS_REGION="us-west-1"
     set KEY_PAIR_NAME="your-key-pair-name"
-    set REPO_URL="https://github.com/your-username/ec2-db-quick.git"
-    ```
-
-2.  **Make the script executable:**
+    set REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
 
     ```
-    chmod +x aws_deploy.sh
-    ```
 
-3.  **Run the script from your local terminal.**
+    *Replace the values with your specific AWS region, the name of your `.pem` file (without the extension), and the URL to your forked repository.*
+
+2.  **Make the script executable:**  `chmod +x aws_deploy.sh`
+
+3.  **Run the script from your local terminal.** This will create the EC2 instance, security groups, and clone the repository in the `ec2-user`'s home directory.
 
     ```
     ./aws_deploy.sh
+
     ```
 
-    The script will create the EC2 instance, output its public IP, and clone the repository.
+### Step 2: Install Dependencies & Run App (EC2 Instance)
 
-4.  **Connect and Deploy:** Follow the "Manual Deployment" steps below, starting from **Step 2**, to install Docker and run the application on the newly created instance.
-
-### Option 2: Manual Deployment on an Existing EC2 Instance
-
-Use this method if you already have an EC2 instance running and prefer to set up the environment manually.
-
-#### Step 1: Connect to Your EC2 Instance & Clone Repo
-
-1.  **Connect using SSH:**
+1.  **Connect to the new instance via SSH.** The `aws_deploy.sh` script will output the public IP address. Use it to connect.
 
     ```
     # Replace the path to your .pem file and the public IP address
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
-    ```
-
-2.  **Clone the repository (if not done by `aws_deploy.sh`):**
 
     ```
-    git clone https://github.com/your-username/ec2-db-quick.git
+
+2.  **Run the installation script on the EC2 instance.** Once connected, navigate to the cloned repository and run the setup script. This installs Docker, Docker Compose, and the database CLI clients.
+
+    ```
     cd ec2-db-quick
-    ```
-
-#### Step 2: Install Docker and Docker Compose
-
-1.  **Run the installation script:** This script will install all necessary dependencies on the EC2 host.
-
-    ```
     chmod +x local_docker_install.sh
     ./local_docker_install.sh
-    ```
-
-2.  **IMPORTANT:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
-
-#### Step 3: Run the Application
-
-With Docker and Docker Compose installed, you can now start the application and all three databases with a single command.
-
-1.  **Navigate to the project directory and start the services:** The `--build` flag tells Docker Compose to build the application image. The `-d` flag runs the containers in the background.
 
     ```
-    cd ec2-db-quick
+
+3.  **Start the application.** After the script completes, run the application using Docker Compose. The first build will take several minutes.
+
+    ```
     docker compose up --build -d
+
     ```
 
-2.  **Check the status:** You can see the running containers with `docker compose ps`.
+### Step 3: Querying Databases from the Host (Optional)
 
-#### Step 4: Stop the Application
+After the containers are running, you can connect to each database directly from the EC2 host's terminal using the newly installed CLI clients. This is useful for manual checks or debugging.
 
-To stop and remove all containers, networks, and volumes, run:
+**Connect to PostgreSQL:**
 
 ```
-docker compose down
+psql --host=localhost --username=postgres --dbname=ec2_db_quick_test
+
 ```
 
-### Optional: Install and Configure an Observability Agent
+*(Enter the password `postgres` when prompted.)*
 
-Install your observability vendor's agent directly on the EC2 host.
+**Connect to MySQL:**
 
-1.  **Install the Agent:** Follow your vendor's instructions to install the host agent.
+```
+mysql --host=127.0.0.1 --user=mysql_user -p --database=ec2_db_quick_test
 
-2.  **Configure for Databases:** Enable integrations for PostgreSQL, MySQL, and MSSQL. Since the database ports are mapped to the host, the agent can connect to them via `localhost`.
+```
 
-3.  **Restart the Agent:**  `sudo systemctl restart <agent-service-name>`
+*(Enter the password `mysql_password` when prompted.)*
+
+**Connect to MSSQL:**  *Note: The MSSQL tools may require you to add `/opt/mssql-tools18/bin/` to your PATH. You can do this by running `export PATH="$PATH:/opt/mssql-tools18/bin"`.*
+
+```
+sqlcmd -S localhost -U sa -P 'aStrongPassword123!' -d ec2_db_quick_test
+
+```
