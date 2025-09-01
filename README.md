@@ -52,13 +52,13 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
     chmod +x aws_deploy.sh
     ```
 
-4.  **Run the script from your local terminal.** The script will now read the configuration from your `.env` file and create all necessary AWS resources.
+4.  **Run the script from your local terminal.** The script will now read the configuration from your `.env` file and create all necessary AWS resources and start the application.
 
     ```
     ./aws_deploy.sh
     ```
 
-5. **Connect using SSH:** After the script completes, it will output the Public IP address of the new instance, which you can use to access the host and deploy the app.
+5. **Connect using SSH:** After the script completes, it will output the Public IP address of the new instance, which you can use to access the app and SSH to the host if needed.
     ```
     # Replace the path to your .pem file and the public IP address
     ssh -i /path/to/your/key.pem ec2-user@<your-public-ip>
@@ -102,7 +102,37 @@ Use this method if you already have an EC2 instance running and prefer to set up
 
 4.  **IMPORTANT:** After the script finishes, you **must log out and log back in** to your EC2 instance for the Docker group permissions to apply.
 
-#### Step 3: Install and Configure the Observability Agent
+#### Step 3: Run the Application
+
+With Docker, Docker Compose, and the agent installed, you can now start the application and database with a single command.
+
+1.  **Navigate to the project directory:**
+
+    ```
+    cd ec2-db-quick
+    ```
+
+2.  **Start the services:** The `--build` flag tells Docker Compose to build the application image from the `Dockerfile`. The `-d` flag runs the containers in the background (detached mode).
+
+    ```
+    docker-compose up --build -d
+    ```
+
+3.  **Check the status:** You can see the running containers with `docker-compose ps`.
+
+    ```
+    docker-compose ps
+    ```
+
+#### Step 5: Stop the Application
+
+To stop and remove the containers, network, and volumes defined in the compose file, run:
+
+```
+docker-compose down
+```
+
+#### Optional: Install and Configure the Observability Agent
 
 Install your observability vendor's agent directly on the EC2 host. The agent will then monitor the host and the Docker containers running on it.
 
@@ -132,33 +162,3 @@ Install your observability vendor's agent directly on the EC2 host. The agent wi
     # The service name will depend on your vendor
     sudo systemctl restart <agent-service-name>
     ```
-
-#### Step 4: Run the Application
-
-With Docker, Docker Compose, and the agent installed, you can now start the application and database with a single command.
-
-1.  **Navigate to the project directory:**
-
-    ```
-    cd ec2-db-quick
-    ```
-
-2.  **Start the services:** The `--build` flag tells Docker Compose to build the application image from the `Dockerfile`. The `-d` flag runs the containers in the background (detached mode).
-
-    ```
-    docker-compose up --build -d
-    ```
-
-3.  **Check the status:** You can see the running containers with `docker-compose ps`.
-
-    ```
-    docker-compose ps
-    ```
-
-#### Step 5: Stop the Application
-
-To stop and remove the containers, network, and volumes defined in the compose file, run:
-
-```
-docker-compose down
-```
