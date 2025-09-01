@@ -2,8 +2,6 @@
 
 # This script automates the creation of an EC2 instance and its dependencies
 # using the AWS CLI for the EC2 DB Quick Test application.
-# It reads configuration from environment variables.
-
 set -e # Exit immediately if a command exits with a non-zero status.
 set -o pipefail # Exit if any command in a pipeline fails.
 
@@ -26,9 +24,15 @@ echo "---"
 
 # --- Environment Setup ---
 echo "--> Fetching your public IP address..."
-MY_IP=$(curl -s http://checkip.amazon.com)
+# Try the first service, if it fails, try the second one.
+if ! MY_IP=$(curl -s http://checkip.amazon.com); then
+    echo "--> Primary IP check failed, trying fallback service..."
+    MY_IP=$(curl -s https://ifconfig.me)
+fi
+
+# If after both attempts, the IP is still empty, exit with an error.
 if [ -z "$MY_IP" ]; then
-    echo "❌ Error: Could not determine public IP address. Please check your internet connection."
+    echo "❌ Error: Could not determine public IP address. Please check your internet connection or firewall settings."
     exit 1
 fi
 
@@ -44,12 +48,17 @@ SG_ID=$(aws ec2 describe-security-groups --group-names "$SG_NAME" --region "$AWS
 
 if [ -z "$SG_ID" ]; then
   echo "--> Security Group not found. Creating '$SG_NAME'..."
-  SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Allow SSH and HTTP for test app" --region "$AWS_REGION" --output text)
+  SG_ID=$(aws ec2 create-security-group --group-name "$SG_NAME" --description "Allow SSH and HTTP for test app" --region "$AWS_REGION" --query "GroupId" --output text)
   echo "--> Authorizing inbound rules for new Security Group..."
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION"
   aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION"
 else
-  echo "--> Security Group '$SG_NAME' already exists with ID: $SG_ID. Skipping creation."
+  echo "--> Security Group '$SG_NAME' already exists with ID: $SG_ID."
+  echo "--> Ensuring inbound rules are correctly configured..."
+  # Attempt to add the rules. If they already exist, the command will fail,
+  # but '2>/dev/null || true' suppresses the error and allows the script to continue.
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 22 --cidr "$MY_IP/32" --region "$AWS_REGION" 2>/dev/null || true
+  aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --protocol tcp --port 8000 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
 fi
 
 echo "--> Launching EC2 instance (t2.micro with Amazon Linux 2023)..."
@@ -58,23 +67,32 @@ echo "--> Launching EC2 instance (t2.micro with Amazon Linux 2023)..."
 # This script sets up Docker, clones the repo, and starts the application.
 USER_DATA=$(cat <<EOF
 #!/bin/bash
-yum update -y
-yum install -y docker git
-service docker start
-usermod -a -G docker ec2-user
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+dnf update -y
+# Install Docker and Git using dnf
+dnf install -y docker git
+# Start and enable the Docker service
+systemctl start docker
+systemctl enable docker
+# Add the ec2-user to the docker group so they can run docker commands without sudo
+usermod -aG docker ec2-user
+# Download the latest Docker Compose binary
+curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o /usr/libexec/docker/cli-plugins/docker-compose
+# Make the Docker Compose binary executable
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+# Restart docker to apply changes
+systemctl restart docker
 cd /home/ec2-user
 git clone $REPO_URL
 REPO_NAME=\$(basename $REPO_URL .git)
 chown -R ec2-user:ec2-user \$REPO_NAME
-# Run docker-compose as the ec2-user
-su - ec2-user -c "cd /home/ec2-user/\$REPO_NAME && docker-compose up --build -d"
+# Run docker compose (v2 plugin syntax) as the ec2-user
+# The 'su - ec2-user' command starts a new login shell, which correctly applies the new group membership
+su - ec2-user -c "cd /home/ec2-user/\$REPO_NAME && docker compose up --build -d"
 EOF
 )
 
 INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2023-ami-hvm-x86_64-gp2 \
+  --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
   --instance-type t2.micro \
   --key-name "$KEY_PAIR_NAME" \
   --security-group-ids "$SG_ID" \

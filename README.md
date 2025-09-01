@@ -48,10 +48,9 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
     **On macOS or Linux:**
 
     ```
-    export AWS_REGION="us-east-1"
+    export AWS_REGION="us-west-1"
     export KEY_PAIR_NAME="your-key-pair-name"
-    export REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
-
+    export REPO_URL="https://github.com/your-username/ec2-db-quick.git"
     ```
 
     **On Windows (PowerShell):**
@@ -59,7 +58,7 @@ This method uses the AWS CLI to create and configure an EC2 instance from your l
     ```
     $env:AWS_REGION="us-east-1"
     $env:KEY_PAIR_NAME="your-key-pair-name"
-    $env:REPO_URL="[https://github.com/your-username/ec2-db-quick.git](https://github.com/your-username/ec2-db-quick.git)"
+    $env:REPO_URL="https://github.com/your-username/ec2-db-quick.git"
 
     ```
 
