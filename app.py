@@ -1,6 +1,7 @@
 import os
 import random
 import asyncio
+import time
 import httpx
 import asyncpg
 import aiomysql
@@ -111,7 +112,6 @@ async def init_mysql_db():
         finally:
             if conn:
                 conn.close()
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -243,8 +243,8 @@ async def run_load_generation():
         f"http://localhost:{APP_PORT}/error"
     ]
     async with httpx.AsyncClient() as client:
-        start_time = asyncio.time()
-        while asyncio.time() - start_time < 60:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < 60:
             try:
                 await client.get(random.choice(endpoints), timeout=20)
             except httpx.RequestError as e:

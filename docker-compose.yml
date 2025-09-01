@@ -4,8 +4,10 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - postgres-db
-      - mysql-db
+      postgres-db:
+        condition: service_healthy
+      mysql-db:
+        condition: service_healthy
     environment:
       - PG_HOST=postgres-db
       - MYSQL_HOST=mysql-db
@@ -20,6 +22,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ec2_db_quick_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   mysql-db:
     image: mysql:8.0
@@ -32,6 +39,11 @@ services:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "mysql_user", "--password=mysql_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres-data:

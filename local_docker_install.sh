@@ -36,4 +36,4 @@ echo "============================================================"
 
 # Create a new shell session for the ec2-user to apply group changes
 # This allows docker commands to be run without sudo
-newgrp docker <<'END'
+newgrp docker

@@ -11,6 +11,7 @@ This application provides a set of endpoints designed to generate various types 
 ```
 ec2-db-quick/
 ├── aws_deploy.sh           # Automated AWS EC2 deployment script
+├── aws_cleanup.sh          # Automated AWS resource cleanup script
 ├── local_docker_install.sh # Script to install Docker and DB clients on the EC2 host
 ├── docker-compose.yml      # Manages the app, postgres, and mysql containers
 ├── Dockerfile              # Defines the Python application container
@@ -113,3 +114,27 @@ export PGPASSWORD="postgres" & psql --host=localhost --username=postgres --dbnam
 mysql --host=127.0.0.1 --user=mysql_user -pmysql_password --database=ec2_db_quick_test
 
 ```
+
+### Step 4: Cleanup (Local Machine)
+
+When you are finished testing, run the cleanup script from your local machine to terminate the EC2 instance and delete the security group to avoid ongoing AWS charges.
+
+1.  **Set your AWS_REGION:** Make sure you have exported the same `AWS_REGION` variable you used for deployment.
+
+    ```
+    export AWS_REGION="us-west-1"
+
+    ```
+
+2.  **Make the script executable:**
+
+    ```
+    chmod +x aws_cleanup.sh
+
+    ```
+
+3.  **Run the cleanup script:**
+
+    ```
+    ./aws_cleanup.sh
+    ```
